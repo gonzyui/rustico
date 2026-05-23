@@ -1,6 +1,10 @@
-FROM rust:latest AS builder
+FROM rust:1.82-slim-bookworm AS builder
 
 WORKDIR /usr/src/rustico
+
+RUN apt-get update && apt-get install -y \
+    pkg-config libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY Cargo.toml Cargo.lock ./
 
@@ -15,13 +19,18 @@ RUN touch src/main.rs && cargo build --release
 
 FROM debian:bookworm-slim
 
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    libssl3 \       
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd -r -s /bin/false appuser
 
 WORKDIR /app
+COPY --from=builder /usr/src/rustico/target/release/rustico /app/rustico
 
-COPY --from=builder /usr/src/rustico/target/release/rustico /usr/local/bin/rustico
+RUN chown appuser:appuser /app/rustico
+USER appuser
 
-CMD ["rustico"]
+CMD ["/app/rustico"]
