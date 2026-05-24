@@ -13,7 +13,7 @@
 
 - **AniList Integration**: Automatically fetches newly aired episodes within the last 24 hours.
 - **Anime News Network (ANN) Integration**: Parses the official ANN RSS feed for the latest breaking anime news.
-- **Discord Webhooks**: Sends rich embeds (with thumbnails, colors, and timestamps) straight to your Discord channel.
+- **Discord Webhooks**: Sends display components (with thumbnails, colors, and timestamps) straight to your Discord channel.
 - **Fully Asynchronous**: Built on `tokio` and `reqwest` with HTTP connection pooling for high performance.
 - **Cron Scheduler**: Runs automatically at a configured interval (default: every 15 minutes).
 - **State Tracking**: Remembers previously sent news and episodes to avoid spamming your channel.

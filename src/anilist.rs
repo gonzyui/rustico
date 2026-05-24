@@ -1,6 +1,6 @@
 use crate::discord::send_discord;
 use crate::models::{
-    AniListResponse, AppState, DiscordEmbed, DiscordField, DiscordFooter, DiscordImage,
+    AniListResponse, AppState, Component, Container, MediaGallery, Section, Separator, TextDisplay,
 };
 use crate::utils::clean_html;
 use anyhow::{Context, Result};
@@ -105,60 +105,73 @@ pub async fn check_anilist(
         let description = match schedule.media.description.as_deref() {
             Some(d) if !d.is_empty() => {
                 let cleaned = clean_html(d);
-                if cleaned.chars().count() > 200 {
-                    let mut s: String = cleaned.chars().take(200).collect();
+                if cleaned.chars().count() > 300 {
+                    let mut s: String = cleaned.chars().take(300).collect();
                     s.push_str("...");
                     s
                 } else {
                     cleaned
                 }
             }
-            _ => String::new(),
+            _ => "*No description available.*".to_string(),
         };
 
-        let timestamp = match chrono::DateTime::from_timestamp(schedule.airing_at, 0) {
-            Some(dt) => dt.to_rfc3339(),
-            None => {
-                warn!(
-                    "⚠️ [AniList] Invalid airing_at={} for episode id={}, using now()",
-                    schedule.airing_at, schedule.id
-                );
-                chrono::Utc::now().to_rfc3339()
-            }
+        let airing_ts = schedule.airing_at;
+        let airing_display = if airing_ts > 0 {
+            format!("<t:{}:R>", airing_ts)
+        } else {
+            warn!(
+                "⚠️ [AniList] Invalid airing_at={} for episode id={}",
+                airing_ts, schedule.id
+            );
+            "unknown".to_string()
         };
+
+        let cover_url = schedule
+            .media
+            .cover_image
+            .as_ref()
+            .and_then(|c| c.large.clone());
 
         info!("📤 [AniList] Sending: {} EP{}", title, schedule.episode);
 
-        let embed = DiscordEmbed {
-            title: format!("🎬 {} — Episode {}", title, schedule.episode),
-            description,
-            url: Some(schedule.media.site_url.clone()),
-            fields: vec![
-                DiscordField {
-                    name: "Studio".to_string(),
-                    value: studio_name.to_string(),
-                    inline: true,
-                },
-                DiscordField {
-                    name: "Average Score".to_string(),
-                    value: format!("{}/100", score),
-                    inline: true,
-                },
-            ],
-            color: 0x8A2BE2,
-            footer: DiscordFooter {
-                text: format!("AniList • {}/100", score),
-            },
-            timestamp,
-            thumbnail: schedule
-                .media
-                .cover_image
-                .as_ref()
-                .and_then(|c| c.large.clone())
-                .map(|url| DiscordImage { url }),
-        };
+        let header_text = format!(
+            "# 🎬 {}\n**Episode {}** • aired {}\n[View on AniList]({})",
+            title, schedule.episode, airing_display, schedule.media.site_url
+        );
 
-        if let Err(e) = send_discord(&client, webhook_url, embed).await {
+        let info_text = format!(
+            "**🎨 Studio**\n{}\n\n**⭐ Average Score**\n{}/100",
+            studio_name, score
+        );
+
+        let mut container_components: Vec<Component> = Vec::new();
+
+        if let Some(ref url) = cover_url {
+            container_components.push(Component::Section(Section::with_thumbnail(
+                vec![Component::TextDisplay(TextDisplay::new(header_text))],
+                url.clone(),
+            )));
+        } else {
+            container_components.push(Component::TextDisplay(TextDisplay::new(header_text)));
+        }
+
+        container_components.push(Component::Separator(Separator::new(true, false)));
+        container_components.push(Component::TextDisplay(TextDisplay::new(description)));
+        container_components.push(Component::Separator(Separator::new(true, false)));
+        container_components.push(Component::TextDisplay(TextDisplay::new(info_text)));
+        container_components.push(Component::Separator(Separator::new(false, false)));
+        container_components.push(Component::TextDisplay(TextDisplay::new(format!(
+            "-# AniList • {}/100",
+            score
+        ))));
+
+        let components = vec![Component::Container(Container::new(
+            Some(0x8A2BE2),
+            container_components,
+        ))];
+
+        if let Err(e) = send_discord(&client, webhook_url, components).await {
             error!("❌ [AniList] Discord delivery failed: {:?}", e);
         } else {
             new_count += 1;
