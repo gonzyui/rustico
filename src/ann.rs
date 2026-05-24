@@ -1,5 +1,6 @@
 use crate::discord::send_discord;
 use crate::models::{AppState, DiscordEmbed, DiscordFooter};
+use crate::utils::clean_html;
 use anyhow::Result;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -56,20 +57,18 @@ pub async fn check_ann(
         }
 
         let title = item.title().unwrap_or("Untitled").to_string();
-        let link = item.link().unwrap_or("").to_string();
-        let description = item
-            .description()
-            .unwrap_or("")
-            .chars()
-            .take(300)
-            .collect::<String>();
+        let link = item.link().map(String::from);
+
+        let raw_desc = item.description().unwrap_or("");
+        let cleaned = clean_html(raw_desc);
+        let description: String = cleaned.chars().take(300).collect();
 
         info!("📤 [ANN] Sending: {}", title);
 
         let embed = DiscordEmbed {
             title: format!("📰 {}", title),
             description,
-            url: link,
+            url: link.filter(|s| !s.is_empty()),
             color: 0x1E90FF,
             footer: DiscordFooter {
                 text: "Anime News Network".to_string(),

@@ -2,9 +2,11 @@ mod anilist;
 mod ann;
 mod discord;
 mod models;
+mod utils;
 
 use anyhow::{Context, Result};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio_cron_scheduler::{Job, JobScheduler};
 use tracing::{error, info};
@@ -37,9 +39,19 @@ async fn main() -> Result<()> {
         .unwrap_or(15);
 
     let state = Arc::new(Mutex::new(AppState::default()));
-    let client = reqwest::Client::new();
 
-    info!("🚀 Starting Rustico");
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .connect_timeout(Duration::from_secs(10))
+        .user_agent(concat!(
+            "Rustico/",
+            env!("CARGO_PKG_VERSION"),
+            " (+https://github.com/gonzyui/rustico)"
+        ))
+        .build()
+        .context("Failed to build reqwest client")?;
+
+    info!("🚀 Starting Rustico v{}", env!("CARGO_PKG_VERSION"));
     info!(
         "   Webhook configured: {}...",
         &webhook_url[..50.min(webhook_url.len())]
@@ -60,7 +72,10 @@ async fn main() -> Result<()> {
         error!("AniList Error: {:?}", e);
     }
 
-    let sched = JobScheduler::new().await?;
+    state.lock().await.initialized = true;
+    info!("✅ Initial pass completed — state initialized");
+
+    let mut sched = JobScheduler::new().await?;
     let cron_expr = format!("0 */{} * * * *", interval_min);
     info!("⏰ Cron configured: '{}'", cron_expr);
 
@@ -75,15 +90,12 @@ async fn main() -> Result<()> {
             let webhook = webhook_clone.clone();
             let rss = rss_clone.clone();
             let client = client_clone.clone();
-
             Box::pin(async move {
-                info!("⏰ Scheduler tick!");
-
+                info!("⏰ Scheduled tick");
                 if let Err(e) = check_ann(state.clone(), client.clone(), &webhook, &rss).await {
                     error!("ANN Error: {:?}", e);
                 }
-
-                if let Err(e) = check_anilist(state, client, &webhook).await {
+                if let Err(e) = check_anilist(state.clone(), client.clone(), &webhook).await {
                     error!("AniList Error: {:?}", e);
                 }
             })
@@ -91,9 +103,17 @@ async fn main() -> Result<()> {
         .await?;
 
     sched.start().await?;
-    info!("✅ Scheduler started, waiting...");
+    info!("✅ Scheduler started — press Ctrl+C to stop");
 
-    loop {
-        tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
+    tokio::signal::ctrl_c()
+        .await
+        .context("Failed to listen for Ctrl+C")?;
+
+    info!("🛑 Shutdown signal received, stopping scheduler...");
+    if let Err(e) = sched.shutdown().await {
+        error!("Error during scheduler shutdown: {:?}", e);
     }
+    info!("👋 Bye!");
+
+    Ok(())
 }

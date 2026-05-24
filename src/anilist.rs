@@ -2,6 +2,7 @@ use crate::discord::send_discord;
 use crate::models::{
     AniListResponse, AppState, DiscordEmbed, DiscordField, DiscordFooter, DiscordImage,
 };
+use crate::utils::clean_html;
 use anyhow::{Context, Result};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -103,12 +104,13 @@ pub async fn check_anilist(
 
         let description = match schedule.media.description.as_deref() {
             Some(d) if !d.is_empty() => {
-                if d.chars().count() > 200 {
-                    let mut s: String = d.chars().take(200).collect();
+                let cleaned = clean_html(d);
+                if cleaned.chars().count() > 200 {
+                    let mut s: String = cleaned.chars().take(200).collect();
                     s.push_str("...");
                     s
                 } else {
-                    d.to_string()
+                    cleaned
                 }
             }
             _ => String::new(),
@@ -130,7 +132,7 @@ pub async fn check_anilist(
         let embed = DiscordEmbed {
             title: format!("🎬 {} — Episode {}", title, schedule.episode),
             description,
-            url: schedule.media.site_url.clone(),
+            url: Some(schedule.media.site_url.clone()),
             fields: vec![
                 DiscordField {
                     name: "Studio".to_string(),

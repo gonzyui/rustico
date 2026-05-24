@@ -20,7 +20,8 @@ pub struct DiscordWebhook {
 pub struct DiscordEmbed {
     pub title: String,
     pub description: String,
-    pub url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
     pub color: u32,
     pub footer: DiscordFooter,
     pub timestamp: String,
