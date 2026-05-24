@@ -1,4 +1,4 @@
-use crate::models::{DiscordEmbed, DiscordWebhook};
+use crate::models::{Component, DiscordWebhookV2, COMPONENTS_V2_FLAG};
 use anyhow::Result;
 use base64::{engine::general_purpose, Engine as _};
 use tracing::warn;
@@ -6,15 +6,22 @@ use tracing::warn;
 pub async fn send_discord(
     client: &reqwest::Client,
     webhook_url: &str,
-    embed: DiscordEmbed,
+    components: Vec<Component>,
 ) -> Result<()> {
-    let payload = DiscordWebhook {
+    let payload = DiscordWebhookV2 {
         username: "Rustico".to_string(),
         avatar_url: None,
-        embeds: vec![embed],
+        flags: COMPONENTS_V2_FLAG,
+        components,
     };
 
-    let res = client.post(webhook_url).json(&payload).send().await?;
+    let url = if webhook_url.contains('?') {
+        format!("{}&with_components=true", webhook_url)
+    } else {
+        format!("{}?with_components=true", webhook_url)
+    };
+
+    let res = client.post(&url).json(&payload).send().await?;
     let status = res.status();
 
     if !status.is_success() {

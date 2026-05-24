@@ -1,5 +1,5 @@
 use crate::discord::send_discord;
-use crate::models::{AppState, DiscordEmbed, DiscordFooter};
+use crate::models::{AppState, Component, Container, Separator, TextDisplay};
 use crate::utils::clean_html;
 use anyhow::Result;
 use std::sync::Arc;
@@ -57,28 +57,47 @@ pub async fn check_ann(
         }
 
         let title = item.title().unwrap_or("Untitled").to_string();
-        let link = item.link().map(String::from);
+        let link = item.link().map(String::from).filter(|s| !s.is_empty());
 
         let raw_desc = item.description().unwrap_or("");
         let cleaned = clean_html(raw_desc);
-        let description: String = cleaned.chars().take(300).collect();
+        let description: String = if cleaned.is_empty() {
+            "*No description available.*".to_string()
+        } else {
+            let truncated: String = cleaned.chars().take(400).collect();
+            if cleaned.chars().count() > 400 {
+                format!("{}...", truncated)
+            } else {
+                truncated
+            }
+        };
 
         info!("📤 [ANN] Sending: {}", title);
 
-        let embed = DiscordEmbed {
-            title: format!("📰 {}", title),
-            description,
-            url: link.filter(|s| !s.is_empty()),
-            color: 0x1E90FF,
-            footer: DiscordFooter {
-                text: "Anime News Network".to_string(),
-            },
-            timestamp: chrono::Utc::now().to_rfc3339(),
-            thumbnail: None,
-            fields: vec![],
+        let header = match &link {
+            Some(url) => format!("# 📰 {}\n[Read full article]({})", title, url),
+            None => format!("# 📰 {}", title),
         };
 
-        if let Err(e) = send_discord(&client, webhook_url, embed).await {
+        let now_relative = format!("<t:{}:R>", chrono::Utc::now().timestamp());
+
+        let container_components = vec![
+            Component::TextDisplay(TextDisplay::new(header)),
+            Component::Separator(Separator::new(true, false)),
+            Component::TextDisplay(TextDisplay::new(description)),
+            Component::Separator(Separator::new(false, false)),
+            Component::TextDisplay(TextDisplay::new(format!(
+                "-# Anime News Network • {}",
+                now_relative
+            ))),
+        ];
+
+        let components = vec![Component::Container(Container::new(
+            Some(0x1E90FF),
+            container_components,
+        ))];
+
+        if let Err(e) = send_discord(&client, webhook_url, components).await {
             error!("❌ [ANN] Discord delivery failed: {:?}", e);
         } else {
             new_count += 1;
