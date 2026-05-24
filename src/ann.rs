@@ -7,7 +7,7 @@ use tracing::{debug, error, info};
 
 pub async fn check_ann(
     state: Arc<Mutex<AppState>>,
-    client: Arc<reqwest::Client>,
+    client: reqwest::Client,
     webhook_url: &str,
     rss_url: &str,
 ) -> Result<()> {
@@ -70,12 +70,13 @@ pub async fn check_ann(
             title: format!("📰 {}", title),
             description,
             url: link,
-            color: 0x1E90FF, // Dodger Blue
+            color: 0x1E90FF,
             footer: DiscordFooter {
                 text: "Anime News Network".to_string(),
             },
             timestamp: chrono::Utc::now().to_rfc3339(),
             thumbnail: None,
+            fields: vec![],
         };
 
         if let Err(e) = send_discord(&client, webhook_url, embed).await {

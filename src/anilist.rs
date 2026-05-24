@@ -1,13 +1,15 @@
 use crate::discord::send_discord;
-use crate::models::{AniListResponse, AppState, DiscordEmbed, DiscordFooter, DiscordImage};
+use crate::models::{
+    AniListResponse, AppState, DiscordEmbed, DiscordField, DiscordFooter, DiscordImage,
+};
 use anyhow::{Context, Result};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 pub async fn check_anilist(
     state: Arc<Mutex<AppState>>,
-    client: Arc<reqwest::Client>,
+    client: reqwest::Client,
     webhook_url: &str,
 ) -> Result<()> {
     info!("🔍 [AniList] Fetching recent episodes...");
@@ -26,6 +28,11 @@ pub async fn check_anilist(
                         title { romaji english }
                         siteUrl
                         coverImage { large }
+                        description(asHtml: false)
+                        averageScore
+                        studios(isMain: true) {
+                            nodes { name }
+                        }
                     }
                 }
             }
@@ -80,23 +87,67 @@ pub async fn check_anilist(
             .media
             .title
             .english
-            .clone()
-            .or(schedule.media.title.romaji.clone())
-            .unwrap_or_else(|| "Unknown Anime".to_string());
+            .as_deref()
+            .or(schedule.media.title.romaji.as_deref())
+            .unwrap_or("Unknown Anime");
+
+        let studio_name = schedule
+            .media
+            .studios
+            .as_ref()
+            .and_then(|s| s.nodes.first())
+            .map(|n| n.name.as_str())
+            .unwrap_or("Unknown Studio");
+
+        let score = schedule.media.average_score.unwrap_or(0);
+
+        let description = match schedule.media.description.as_deref() {
+            Some(d) if !d.is_empty() => {
+                if d.chars().count() > 200 {
+                    let mut s: String = d.chars().take(200).collect();
+                    s.push_str("...");
+                    s
+                } else {
+                    d.to_string()
+                }
+            }
+            _ => String::new(),
+        };
+
+        let timestamp = match chrono::DateTime::from_timestamp(schedule.airing_at, 0) {
+            Some(dt) => dt.to_rfc3339(),
+            None => {
+                warn!(
+                    "⚠️ [AniList] Invalid airing_at={} for episode id={}, using now()",
+                    schedule.airing_at, schedule.id
+                );
+                chrono::Utc::now().to_rfc3339()
+            }
+        };
 
         info!("📤 [AniList] Sending: {} EP{}", title, schedule.episode);
 
         let embed = DiscordEmbed {
             title: format!("🎬 {} — Episode {}", title, schedule.episode),
-            description: "New episode available!".to_string(),
+            description,
             url: schedule.media.site_url.clone(),
-            color: 0x8A2BE2, // BlueViolet
+            fields: vec![
+                DiscordField {
+                    name: "Studio".to_string(),
+                    value: studio_name.to_string(),
+                    inline: true,
+                },
+                DiscordField {
+                    name: "Average Score".to_string(),
+                    value: format!("{}/100", score),
+                    inline: true,
+                },
+            ],
+            color: 0x8A2BE2,
             footer: DiscordFooter {
-                text: "AniList".to_string(),
+                text: format!("AniList • {}/100", score),
             },
-            timestamp: chrono::DateTime::from_timestamp(schedule.airing_at, 0)
-                .unwrap_or_else(chrono::Utc::now)
-                .to_rfc3339(),
+            timestamp,
             thumbnail: schedule
                 .media
                 .cover_image

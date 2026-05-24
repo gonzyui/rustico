@@ -18,7 +18,11 @@ async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
 
     tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG)
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::builder()
+                .with_default_directive(tracing::Level::INFO.into())
+                .parse_lossy("info,rustico=debug"),
+        )
         .init();
 
     let webhook_url =
@@ -33,7 +37,7 @@ async fn main() -> Result<()> {
         .unwrap_or(15);
 
     let state = Arc::new(Mutex::new(AppState::default()));
-    let client = Arc::new(reqwest::Client::new());
+    let client = reqwest::Client::new();
 
     info!("🚀 Starting Rustico");
     info!(
@@ -43,6 +47,10 @@ async fn main() -> Result<()> {
     info!("   Interval: {} min", interval_min);
 
     info!("⏱️ Executing initial pass...");
+
+    if let Err(e) = crate::discord::set_webhook_avatar(&client, &webhook_url).await {
+        error!("Webhook avatar configuration error: {:?}", e);
+    }
 
     if let Err(e) = check_ann(state.clone(), client.clone(), &webhook_url, &rss_url).await {
         error!("ANN Error: {:?}", e);
