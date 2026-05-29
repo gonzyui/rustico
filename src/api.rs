@@ -135,11 +135,12 @@ pub async fn start_health_api(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::{create_shared_state, AppState};
 
     #[test]
     fn test_api_state_creation() {
         let api_state = ApiState {
-            shared_state: crate::state::create_shared_state(AppState::default()),
+            shared_state: create_shared_state(AppState::default()),
             start_time: std::time::Instant::now(),
         };
         assert!(api_state.start_time.elapsed().as_secs() < 1);
