@@ -1,12 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
-
-#[derive(Default, Debug)]
-pub struct AppState {
-    pub seen_ann: HashSet<String>,
-    pub seen_anilist: HashSet<i64>,
-    pub initialized: bool,
-}
 
 // =====================================================
 //                DISCORD COMPONENTS V2
@@ -23,17 +15,18 @@ pub struct DiscordWebhookV2 {
     pub components: Vec<Component>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 #[serde(untagged)]
 pub enum Component {
     Container(Container),
     TextDisplay(TextDisplay),
     Separator(Separator),
+    #[allow(dead_code)]
     MediaGallery(MediaGallery),
     Section(Section),
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct Container {
     #[serde(rename = "type")]
     pub kind: u8, // 17
@@ -42,14 +35,14 @@ pub struct Container {
     pub components: Vec<Component>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct TextDisplay {
     #[serde(rename = "type")]
     pub kind: u8, // 10
     pub content: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct Separator {
     #[serde(rename = "type")]
     pub kind: u8, // 14
@@ -59,26 +52,27 @@ pub struct Separator {
     pub spacing: Option<u8>, // 1 = small, 2 = large
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
+#[allow(dead_code)]
 pub struct MediaGallery {
     #[serde(rename = "type")]
     pub kind: u8, // 12
     pub items: Vec<MediaGalleryItem>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct MediaGalleryItem {
     pub media: UnfurledMediaItem,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct UnfurledMediaItem {
     pub url: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct Section {
     #[serde(rename = "type")]
     pub kind: u8, // 9
@@ -86,7 +80,7 @@ pub struct Section {
     pub accessory: Thumbnail,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct Thumbnail {
     #[serde(rename = "type")]
     pub kind: u8, // 11
@@ -118,6 +112,7 @@ impl Separator {
 }
 
 impl MediaGallery {
+    #[allow(dead_code)]
     pub fn single(url: impl Into<String>) -> Self {
         Self {
             kind: 12,
