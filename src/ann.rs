@@ -1,15 +1,15 @@
-use crate::discord::send_discord;
-use crate::models::{AppState, Component, Container, Separator, TextDisplay};
+use crate::config::Config;
+use crate::models::{Component, Container, Separator, TextDisplay};
+use crate::processor::send_to_all_webhooks;
+use crate::state::SharedAppState;
 use crate::utils::clean_html;
 use anyhow::Result;
-use std::sync::Arc;
-use tokio::sync::Mutex;
 use tracing::{debug, error, info};
 
 pub async fn check_ann(
-    state: Arc<Mutex<AppState>>,
+    state: SharedAppState,
     client: reqwest::Client,
-    webhook_url: &str,
+    config: &Config,
     rss_url: &str,
 ) -> Result<()> {
     info!("🔍 [ANN] Fetching RSS feed: {}", rss_url);
@@ -26,12 +26,17 @@ pub async fn check_ann(
     let mut state_guard = state.lock().await;
     let mut new_count = 0;
     let first_run = !state_guard.initialized;
+    let demo_limit = config.scheduling.demo_mode_item_limit;
 
     if first_run {
-        info!("🆕 [ANN] First run → sending the 3 most recent articles as demo");
+        info!("🆕 [ANN] First run → sending up to {} articles as demo", demo_limit);
     }
 
     for (i, item) in channel.items().iter().take(20).enumerate() {
+        if first_run && i >= demo_limit {
+            break;
+        }
+
         let guid = item
             .guid()
             .map(|g| g.value().to_string())
@@ -42,7 +47,7 @@ pub async fn check_ann(
             continue;
         }
 
-        if state_guard.seen_ann.contains(&guid) {
+        if state_guard.is_seen_ann(&guid) {
             debug!(
                 "⏭️ [ANN] Already seen: {}",
                 item.title().unwrap_or("Unknown")
@@ -50,22 +55,19 @@ pub async fn check_ann(
             continue;
         }
 
-        state_guard.seen_ann.insert(guid.clone());
-
-        if first_run && i >= 3 {
-            continue;
-        }
+        state_guard.add_seen_ann(guid);
 
         let title = item.title().unwrap_or("Untitled").to_string();
         let link = item.link().map(String::from).filter(|s| !s.is_empty());
 
         let raw_desc = item.description().unwrap_or("");
         let cleaned = clean_html(raw_desc);
+        let truncate_len = 400;
         let description: String = if cleaned.is_empty() {
             "*No description available.*".to_string()
         } else {
-            let truncated: String = cleaned.chars().take(400).collect();
-            if cleaned.chars().count() > 400 {
+            let truncated: String = cleaned.chars().take(truncate_len).collect();
+            if cleaned.chars().count() > truncate_len {
                 format!("{}...", truncated)
             } else {
                 truncated
@@ -97,15 +99,28 @@ pub async fn check_ann(
             container_components,
         ))];
 
-        if let Err(e) = send_discord(&client, webhook_url, components).await {
-            error!("❌ [ANN] Discord delivery failed: {:?}", e);
-        } else {
-            new_count += 1;
+        match send_to_all_webhooks(&client, &config.discord.webhook_urls, components).await {
+            Ok(count) => {
+                new_count += count as u32;
+                state_guard.increment_articles_sent();
+            }
+            Err(e) => {
+                error!("❌ [ANN] Discord delivery failed: {:?}", e);
+                state_guard.increment_errors();
+            }
         }
 
-        tokio::time::sleep(tokio::time::Duration::from_millis(800)).await;
+        // Release lock before sleeping
+        drop(state_guard);
+        tokio::time::sleep(tokio::time::Duration::from_millis(
+            config.discord.delay_between_messages_ms,
+        ))
+        .await;
+        state_guard = state.lock().await;
     }
 
+    state_guard.initialized = true;
+    state_guard.update_last_check();
     info!("✅ [ANN] Sent {} article(s)", new_count);
     Ok(())
 }

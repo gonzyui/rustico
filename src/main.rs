@@ -1,19 +1,24 @@
 mod anilist;
 mod ann;
+mod api;
+mod config;
 mod discord;
 mod models;
+mod processor;
+mod state;
 mod utils;
 
 use anyhow::{Context, Result};
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio_cron_scheduler::{Job, JobScheduler};
 use tracing::{error, info};
 
 use crate::anilist::check_anilist;
 use crate::ann::check_ann;
-use crate::models::AppState;
+use crate::api::start_health_api;
+use crate::config::Config;
+use crate::state::AppState;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -27,22 +32,27 @@ async fn main() -> Result<()> {
         )
         .init();
 
-    let webhook_url =
-        std::env::var("DISCORD_WEBHOOK_URL").context("Missing DISCORD_WEBHOOK_URL in .env")?;
+    // Load and validate configuration
+    let config = Config::from_env().context("Configuration error")?;
+    config.validate().context("Configuration validation failed")?;
 
-    let rss_url = std::env::var("ANN_RSS_URL")
-        .unwrap_or_else(|_| "https://www.animenewsnetwork.com/all/rss.xml".to_string());
+    info!("🚀 Starting Rustico v{}", env!("CARGO_PKG_VERSION"));
+    info!("📝 Configuration:");
+    info!("   Webhooks: {} webhook(s) configured", config.discord.webhook_urls.len());
+    info!("   ANN RSS: {} feed(s)", config.sources.ann_rss_urls.len());
+    info!("   AniList: {}", if config.sources.anilist_enabled { "enabled" } else { "disabled" });
+    info!("   API: {}", if config.api.enabled { "enabled" } else { "disabled" });
+    info!("   Interval: {} min", config.scheduling.check_interval_minutes);
+    info!("   Delay between messages: {} ms", config.discord.delay_between_messages_ms);
 
-    let interval_min: u64 = std::env::var("CHECK_INTERVAL_MINUTES")
-        .unwrap_or_else(|_| "15".to_string())
-        .parse()
-        .unwrap_or(15);
+    // Load or create state
+    let app_state = AppState::load();
+    let shared_state = Arc::new(Mutex::new(app_state.clone()));
 
-    let state = Arc::new(Mutex::new(AppState::default()));
-
+    // Build HTTP client
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .connect_timeout(Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(30))
+        .connect_timeout(std::time::Duration::from_secs(10))
         .user_agent(concat!(
             "Rustico/",
             env!("CARGO_PKG_VERSION"),
@@ -51,52 +61,103 @@ async fn main() -> Result<()> {
         .build()
         .context("Failed to build reqwest client")?;
 
-    info!("🚀 Starting Rustico v{}", env!("CARGO_PKG_VERSION"));
-    info!(
-        "   Webhook configured: {}...",
-        &webhook_url[..50.min(webhook_url.len())]
-    );
-    info!("   Interval: {} min", interval_min);
-
     info!("⏱️ Executing initial pass...");
 
-    if let Err(e) = crate::discord::set_webhook_avatar(&client, &webhook_url).await {
-        error!("Webhook avatar configuration error: {:?}", e);
+    // Set webhook avatar
+    for webhook_url in &config.discord.webhook_urls {
+        if let Err(e) = crate::discord::set_webhook_avatar(&client, webhook_url).await {
+            error!("Webhook avatar configuration error: {:?}", e);
+        }
     }
 
-    if let Err(e) = check_ann(state.clone(), client.clone(), &webhook_url, &rss_url).await {
-        error!("ANN Error: {:?}", e);
+    // Check sources
+    for rss_url in &config.sources.ann_rss_urls {
+        if let Err(e) = check_ann(shared_state.clone(), client.clone(), &config, rss_url).await {
+            error!("ANN Error: {:?}", e);
+            {
+                let mut state = shared_state.lock().await;
+                state.increment_errors();
+            }
+        }
     }
 
-    if let Err(e) = check_anilist(state.clone(), client.clone(), &webhook_url).await {
-        error!("AniList Error: {:?}", e);
+    if config.sources.anilist_enabled {
+        if let Err(e) = check_anilist(shared_state.clone(), client.clone(), &config).await {
+            error!("AniList Error: {:?}", e);
+            {
+                let mut state = shared_state.lock().await;
+                state.increment_errors();
+            }
+        }
     }
 
-    state.lock().await.initialized = true;
+    {
+        let mut state = shared_state.lock().await;
+        state.initialized = true;
+        if let Err(e) = state.save() {
+            error!("Failed to save state: {:?}", e);
+        }
+    }
+
     info!("✅ Initial pass completed — state initialized");
 
+    // Start health API in background
+    let api_config = config.clone();
+    let api_state = shared_state.clone();
+    tokio::spawn(async move {
+        if let Err(e) = start_health_api(&api_config, api_state).await {
+            error!("Health API error: {:?}", e);
+        }
+    });
+
+    // Setup scheduler
     let mut sched = JobScheduler::new().await?;
-    let cron_expr = format!("0 */{} * * * *", interval_min);
+    let cron_expr = format!("0 */{} * * * *", config.scheduling.check_interval_minutes);
     info!("⏰ Cron configured: '{}'", cron_expr);
 
-    let state_clone = state.clone();
-    let webhook_clone = webhook_url.clone();
-    let rss_clone = rss_url.clone();
+    let state_clone = shared_state.clone();
+    let webhook_clone = config.discord.webhook_urls.clone();
+    let rss_clone = config.sources.ann_rss_urls.clone();
     let client_clone = client.clone();
+    let config_clone = config.clone();
+    let anilist_enabled = config.sources.anilist_enabled;
 
     sched
         .add(Job::new_async(cron_expr.as_str(), move |_uuid, _l| {
             let state = state_clone.clone();
-            let webhook = webhook_clone.clone();
-            let rss = rss_clone.clone();
+            let _webhooks = webhook_clone.clone();
+            let rss_urls = rss_clone.clone();
             let client = client_clone.clone();
+            let cfg = config_clone.clone();
+            let anilist_en = anilist_enabled;
+
             Box::pin(async move {
                 info!("⏰ Scheduled tick");
-                if let Err(e) = check_ann(state.clone(), client.clone(), &webhook, &rss).await {
-                    error!("ANN Error: {:?}", e);
+
+                for rss_url in &rss_urls {
+                    if let Err(e) = check_ann(state.clone(), client.clone(), &cfg, rss_url).await {
+                        error!("ANN Error: {:?}", e);
+                        {
+                            let mut s = state.lock().await;
+                            s.increment_errors();
+                        }
+                    }
                 }
-                if let Err(e) = check_anilist(state.clone(), client.clone(), &webhook).await {
-                    error!("AniList Error: {:?}", e);
+
+                if anilist_en {
+                    if let Err(e) = check_anilist(state.clone(), client.clone(), &cfg).await {
+                        error!("AniList Error: {:?}", e);
+                        {
+                            let mut s = state.lock().await;
+                            s.increment_errors();
+                        }
+                    }
+                }
+
+                // Save state after each check
+                let s = state.lock().await;
+                if let Err(e) = (*s).clone().save() {
+                    error!("Failed to save state: {:?}", e);
                 }
             })
         })?)
@@ -113,6 +174,15 @@ async fn main() -> Result<()> {
     if let Err(e) = sched.shutdown().await {
         error!("Error during scheduler shutdown: {:?}", e);
     }
+
+    // Save state before exit
+    {
+        let state = shared_state.lock().await;
+        if let Err(e) = (*state).clone().save() {
+            error!("Failed to save state before exit: {:?}", e);
+        }
+    }
+
     info!("👋 Bye!");
 
     Ok(())

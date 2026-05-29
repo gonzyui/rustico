@@ -1,17 +1,17 @@
-use crate::discord::send_discord;
+use crate::config::Config;
 use crate::models::{
-    AniListResponse, AppState, Component, Container, MediaGallery, Section, Separator, TextDisplay,
+    AniListResponse, Component, Container, Section, Separator, TextDisplay,
 };
+use crate::processor::send_to_all_webhooks;
+use crate::state::SharedAppState;
 use crate::utils::clean_html;
 use anyhow::{Context, Result};
-use std::sync::Arc;
-use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 
 pub async fn check_anilist(
-    state: Arc<Mutex<AppState>>,
+    state: SharedAppState,
     client: reqwest::Client,
-    webhook_url: &str,
+    config: &Config,
 ) -> Result<()> {
     info!("🔍 [AniList] Fetching recent episodes...");
 
@@ -69,20 +69,21 @@ pub async fn check_anilist(
     let mut state_guard = state.lock().await;
     let first_run = !state_guard.initialized;
     let mut new_count = 0;
+    let demo_limit = config.scheduling.demo_mode_item_limit;
 
     if first_run {
-        info!("🆕 [AniList] First run → sending the 3 most recent episodes as demo");
+        info!("🆕 [AniList] First run → sending up to {} episodes as demo", demo_limit);
     }
 
     for (i, schedule) in res.data.page.airing_schedules.iter().enumerate() {
-        if state_guard.seen_anilist.contains(&schedule.id) {
-            continue;
+        if first_run && i >= demo_limit {
+            break;
         }
-        state_guard.seen_anilist.insert(schedule.id);
 
-        if first_run && i >= 3 {
+        if state_guard.is_seen_anilist(schedule.id) {
             continue;
         }
+        state_guard.add_seen_anilist(schedule.id);
 
         let title = schedule
             .media
@@ -102,11 +103,12 @@ pub async fn check_anilist(
 
         let score = schedule.media.average_score.unwrap_or(0);
 
+        let truncate_len = 300;
         let description = match schedule.media.description.as_deref() {
             Some(d) if !d.is_empty() => {
                 let cleaned = clean_html(d);
-                if cleaned.chars().count() > 300 {
-                    let mut s: String = cleaned.chars().take(300).collect();
+                if cleaned.chars().count() > truncate_len {
+                    let mut s: String = cleaned.chars().take(truncate_len).collect();
                     s.push_str("...");
                     s
                 } else {
@@ -171,16 +173,28 @@ pub async fn check_anilist(
             container_components,
         ))];
 
-        if let Err(e) = send_discord(&client, webhook_url, components).await {
-            error!("❌ [AniList] Discord delivery failed: {:?}", e);
-        } else {
-            new_count += 1;
+        match send_to_all_webhooks(&client, &config.discord.webhook_urls, components).await {
+            Ok(count) => {
+                new_count += count as u32;
+                state_guard.increment_episodes_sent();
+            }
+            Err(e) => {
+                error!("❌ [AniList] Discord delivery failed: {:?}", e);
+                state_guard.increment_errors();
+            }
         }
 
-        tokio::time::sleep(tokio::time::Duration::from_millis(800)).await;
+        // Release lock before sleeping
+        drop(state_guard);
+        tokio::time::sleep(tokio::time::Duration::from_millis(
+            config.discord.delay_between_messages_ms,
+        ))
+        .await;
+        state_guard = state.lock().await;
     }
 
     state_guard.initialized = true;
+    state_guard.update_last_check();
 
     info!("✅ [AniList] Sent {} episode(s)", new_count);
     Ok(())

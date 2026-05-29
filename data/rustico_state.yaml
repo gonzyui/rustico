@@ -1,0 +1,58 @@
+seen_ann:
+- https://www.animenewsnetwork.com/cms/.237849
+- https://www.animenewsnetwork.com/cms/.237898
+- https://www.animenewsnetwork.com/cms/.237927
+- https://www.animenewsnetwork.com/cms/.237907
+- https://www.animenewsnetwork.com/cms/.237934
+- https://www.animenewsnetwork.com/cms/.237903
+- https://www.animenewsnetwork.com/cms/.237910
+- https://www.animenewsnetwork.com/cms/.237925
+- https://www.animenewsnetwork.com/cms/.237848
+- https://www.animenewsnetwork.com/cms/.237911
+- https://www.animenewsnetwork.com/cms/.237905
+- https://www.animenewsnetwork.com/cms/.237813
+- https://www.animenewsnetwork.com/cms/.237902
+- https://www.animenewsnetwork.com/cms/.237532
+- https://www.animenewsnetwork.com/cms/.237897
+- https://www.animenewsnetwork.com/cms/.237906
+- https://www.animenewsnetwork.com/cms/.237430
+- https://www.animenewsnetwork.com/cms/.237912
+- https://www.animenewsnetwork.com/cms/.237884
+- https://www.animenewsnetwork.com/cms/.237872
+seen_anilist:
+- 410076
+- 409219
+- 412110
+- 410224
+- 412662
+- 413127
+- 411587
+- 412208
+- 413026
+- 363043
+- 412206
+- 412152
+- 406051
+- 412205
+- 413295
+- 409046
+- 413082
+- 410930
+- 412602
+- 405079
+- 412207
+- 414289
+- 412563
+- 413565
+- 407568
+- 410207
+- 410078
+- 407365
+- 408792
+- 413625
+initialized: true
+stats:
+  total_articles_sent: 20
+  total_episodes_sent: 30
+  total_errors: 0
+  last_check: 2026-05-29T09:15:00.581829608+00:00

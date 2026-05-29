@@ -1,0 +1,68 @@
+# Rustico - Advanced Message Templates Configuration
+# This file allows customizing how messages are displayed on Discord
+
+colors:
+  ann: 0x1E90FF      # Dodger Blue for ANN articles
+  anilist: 0x8A2BE2  # Blue Violet for AniList episodes
+  error: 0xFF0000    # Red for errors
+  success: 0x00FF00  # Green for success
+
+formatting:
+  # ANN Article formatting
+  ann:
+    username: "Rustico"
+    title_prefix: "📰"
+    show_timestamp: true
+    truncate_description: 400
+    show_source: true
+    sections:
+      - type: "header"
+        format: "# {title_prefix} {title}"
+      - type: "link"
+        format: "[Read full article]({link})"
+      - type: "separator"
+      - type: "description"
+      - type: "metadata"
+        format: "-# {source} • {timestamp}"
+
+  # AniList Episode formatting
+  anilist:
+    username: "Rustico"
+    title_prefix: "🎬"
+    show_timestamp: true
+    truncate_description: 300
+    show_cover: true
+    show_score: true
+    sections:
+      - type: "header"
+        format: "# {title_prefix} {title}\n**Episode {episode}** • aired {airing_time}"
+      - type: "link"
+        format: "[View on AniList]({url})"
+      - type: "thumbnail"
+        url_field: "cover_url"
+      - type: "separator"
+      - type: "description"
+      - type: "metadata"
+        format: "**🎨 Studio**\n{studio}\n\n**⭐ Average Score**\n{score}/100"
+      - type: "separator"
+      - type: "footer"
+        format: "-# AniList • {score}/100"
+
+# Demo mode settings
+demo:
+  enabled: true
+  item_limit: 3
+  show_banner: true
+  banner_text: "🚀 Demo Mode - First run initialized"
+
+# Error handling
+errors:
+  show_in_discord: true
+  notify_webhook: true
+  log_level: "warn"
+
+# Advanced: Custom templates (optional)
+# Uncomment and modify to override default behavior
+# templates:
+#   ann_header: "# 📰 {title}"
+#   anilist_header: "# 🎬 {title} - EP {episode}"
