@@ -73,8 +73,6 @@ pub async fn send_to_all_webhooks(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn test_processor() {
         assert!(true);

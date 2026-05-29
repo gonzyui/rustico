@@ -21,7 +21,7 @@ FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
-    libssl3 \       
+    libssl3 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -29,8 +29,10 @@ RUN useradd -r -s /bin/false appuser
 
 WORKDIR /app
 COPY --from=builder /usr/src/rustico/target/release/rustico /app/rustico
+COPY assets /app/assets
+COPY config /app/config
+RUN mkdir -p /app/data && chown -R appuser:appuser /app
 
-RUN chown appuser:appuser /app/rustico
 USER appuser
 
 CMD ["/app/rustico"]
