@@ -34,20 +34,45 @@ async fn main() -> Result<()> {
 
     // Load and validate configuration
     let config = Config::from_env().context("Configuration error")?;
-    config.validate().context("Configuration validation failed")?;
+    config
+        .validate()
+        .context("Configuration validation failed")?;
 
     info!("🚀 Starting Rustico v{}", env!("CARGO_PKG_VERSION"));
     info!("📝 Configuration:");
-    info!("   Webhooks: {} webhook(s) configured", config.discord.webhook_urls.len());
+    info!(
+        "   Webhooks: {} webhook(s) configured",
+        config.discord.webhook_urls.len()
+    );
     info!("   ANN RSS: {} feed(s)", config.sources.ann_rss_urls.len());
-    info!("   AniList: {}", if config.sources.anilist_enabled { "enabled" } else { "disabled" });
-    info!("   API: {}", if config.api.enabled { "enabled" } else { "disabled" });
-    info!("   Interval: {} min", config.scheduling.check_interval_minutes);
-    info!("   Delay between messages: {} ms", config.discord.delay_between_messages_ms);
+    info!(
+        "   AniList: {}",
+        if config.sources.anilist_enabled {
+            "enabled"
+        } else {
+            "disabled"
+        }
+    );
+    info!(
+        "   API: {}",
+        if config.api.enabled {
+            "enabled"
+        } else {
+            "disabled"
+        }
+    );
+    info!(
+        "   Interval: {} min",
+        config.scheduling.check_interval_minutes
+    );
+    info!(
+        "   Delay between messages: {} ms",
+        config.discord.delay_between_messages_ms
+    );
 
-    // Load or create state
-    let app_state = AppState::load();
-    let shared_state = Arc::new(Mutex::new(app_state.clone()));
+    // Load or create state (async)
+    let app_state = AppState::load().await;
+    let shared_state = Arc::new(Mutex::new(app_state));
 
     // Build HTTP client
     let client = reqwest::Client::builder()
@@ -94,18 +119,21 @@ async fn main() -> Result<()> {
     {
         let mut state = shared_state.lock().await;
         state.initialized = true;
-        if let Err(e) = state.save() {
+        if let Err(e) = state.save().await {
             error!("Failed to save state: {:?}", e);
         }
     }
 
     info!("✅ Initial pass completed — state initialized");
 
-    // Start health API in background
+    // Create shutdown channel for graceful shutdown
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+
+    // Start health API in background with graceful shutdown support
     let api_config = config.clone();
     let api_state = shared_state.clone();
     tokio::spawn(async move {
-        if let Err(e) = start_health_api(&api_config, api_state).await {
+        if let Err(e) = start_health_api(&api_config, api_state, shutdown_rx).await {
             error!("Health API error: {:?}", e);
         }
     });
@@ -116,7 +144,6 @@ async fn main() -> Result<()> {
     info!("⏰ Cron configured: '{}'", cron_expr);
 
     let state_clone = shared_state.clone();
-    let webhook_clone = config.discord.webhook_urls.clone();
     let rss_clone = config.sources.ann_rss_urls.clone();
     let client_clone = client.clone();
     let config_clone = config.clone();
@@ -125,7 +152,6 @@ async fn main() -> Result<()> {
     sched
         .add(Job::new_async(cron_expr.as_str(), move |_uuid, _l| {
             let state = state_clone.clone();
-            let _webhooks = webhook_clone.clone();
             let rss_urls = rss_clone.clone();
             let client = client_clone.clone();
             let cfg = config_clone.clone();
@@ -154,9 +180,9 @@ async fn main() -> Result<()> {
                     }
                 }
 
-                // Save state after each check
-                let s = state.lock().await;
-                if let Err(e) = (*s).clone().save() {
+                // Save state after each check (no unnecessary clone)
+                let state_guard = state.lock().await;
+                if let Err(e) = state_guard.save().await {
                     error!("Failed to save state: {:?}", e);
                 }
             })
@@ -170,15 +196,19 @@ async fn main() -> Result<()> {
         .await
         .context("Failed to listen for Ctrl+C")?;
 
-    info!("🛑 Shutdown signal received, stopping scheduler...");
+    info!("🛑 Shutdown signal received, stopping...");
+
+    // Signal the API server to shut down gracefully
+    let _ = shutdown_tx.send(true);
+
     if let Err(e) = sched.shutdown().await {
         error!("Error during scheduler shutdown: {:?}", e);
     }
 
-    // Save state before exit
+    // Save state before exit (no unnecessary clone)
     {
         let state = shared_state.lock().await;
-        if let Err(e) = (*state).clone().save() {
+        if let Err(e) = state.save().await {
             error!("Failed to save state before exit: {:?}", e);
         }
     }

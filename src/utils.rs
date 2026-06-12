@@ -1,10 +1,9 @@
-use scraper::Html;
 use regex::Regex;
-use once_cell::sync::Lazy;
+use scraper::Html;
+use std::sync::LazyLock;
 
-static HTML_ENTITY_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"&(?:#(\d+)|#x([0-9a-fA-F]+)|([a-zA-Z]+));").unwrap()
-});
+static HTML_ENTITY_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"&(?:#(\d+)|#x([0-9a-fA-F]+)|([a-zA-Z]+));").unwrap());
 
 /// Strips HTML tags and decodes HTML entities from a string
 /// Handles tags typically emitted by ANN and AniList
@@ -16,20 +15,21 @@ pub fn clean_html(s: &str) -> String {
     let html = Html::parse_fragment(s);
     let mut text = String::new();
     extract_text(&html.root_element(), &mut text);
-    
-    text = text.lines()
+
+    text = text
+        .lines()
         .map(|line| line.trim())
         .filter(|line| !line.is_empty())
         .collect::<Vec<_>>()
         .join("\n");
-    
+
     decode_html_entities(&text)
 }
 
 /// Recursively extract text from HTML nodes
 fn extract_text(node: &scraper::element_ref::ElementRef, text: &mut String) {
     use scraper::node::Node;
-    
+
     for child in node.children() {
         match child.value() {
             Node::Text(t) => {
@@ -45,7 +45,7 @@ fn extract_text(node: &scraper::element_ref::ElementRef, text: &mut String) {
                     "li" => text.push_str("\n• "),
                     _ => {}
                 }
-                
+
                 if let Some(child_ref) = scraper::element_ref::ElementRef::wrap(child) {
                     extract_text(&child_ref, text);
                 }
@@ -118,5 +118,31 @@ mod tests {
     #[test]
     fn test_clean_html_empty() {
         assert_eq!(clean_html(""), "");
+    }
+
+    #[test]
+    fn test_clean_html_nested_tags() {
+        let html = "<div><p>Outer <span>inner</span></p></div>";
+        let result = clean_html(html);
+        assert!(result.contains("Outer"));
+        assert!(result.contains("inner"));
+    }
+
+    #[test]
+    fn test_decode_numeric_entity() {
+        let html = "&#65;&#66;&#67;";
+        let result = clean_html(html);
+        assert!(result.contains("A"));
+        assert!(result.contains("B"));
+        assert!(result.contains("C"));
+    }
+
+    #[test]
+    fn test_clean_html_list_items() {
+        let html = "<ul><li>Item 1</li><li>Item 2</li></ul>";
+        let result = clean_html(html);
+        assert!(result.contains("Item 1"));
+        assert!(result.contains("Item 2"));
+        assert!(result.contains("•"));
     }
 }

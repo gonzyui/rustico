@@ -91,13 +91,20 @@ pub struct Thumbnail {
 
 impl Container {
     pub fn new(accent_color: Option<u32>, components: Vec<Component>) -> Self {
-        Self { kind: 17, accent_color, components }
+        Self {
+            kind: 17,
+            accent_color,
+            components,
+        }
     }
 }
 
 impl TextDisplay {
     pub fn new(content: impl Into<String>) -> Self {
-        Self { kind: 10, content: content.into() }
+        Self {
+            kind: 10,
+            content: content.into(),
+        }
     }
 }
 
@@ -131,7 +138,9 @@ impl Section {
             components: text_components,
             accessory: Thumbnail {
                 kind: 11,
-                media: UnfurledMediaItem { url: thumb_url.into() },
+                media: UnfurledMediaItem {
+                    url: thumb_url.into(),
+                },
                 description: None,
             },
         }
@@ -198,4 +207,119 @@ pub struct AniListTitle {
 #[derive(Debug, Deserialize)]
 pub struct AniListCover {
     pub large: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_container_serialization() {
+        let container = Container::new(
+            Some(0x1E90FF),
+            vec![Component::TextDisplay(TextDisplay::new("Hello"))],
+        );
+        let json = serde_json::to_value(&container).unwrap();
+        assert_eq!(json["type"], 17);
+        assert_eq!(json["accent_color"], 0x1E90FF);
+        assert!(json["components"].is_array());
+    }
+
+    #[test]
+    fn test_text_display_serialization() {
+        let td = TextDisplay::new("Test content");
+        let json = serde_json::to_value(&td).unwrap();
+        assert_eq!(json["type"], 10);
+        assert_eq!(json["content"], "Test content");
+    }
+
+    #[test]
+    fn test_separator_serialization() {
+        let sep = Separator::new(true, false);
+        let json = serde_json::to_value(&sep).unwrap();
+        assert_eq!(json["type"], 14);
+        assert_eq!(json["divider"], true);
+        assert_eq!(json["spacing"], 1);
+
+        let large_sep = Separator::new(false, true);
+        let json = serde_json::to_value(&large_sep).unwrap();
+        assert_eq!(json["spacing"], 2);
+    }
+
+    #[test]
+    fn test_section_with_thumbnail_serialization() {
+        let section = Section::with_thumbnail(
+            vec![Component::TextDisplay(TextDisplay::new("Header"))],
+            "https://example.com/image.png",
+        );
+        let json = serde_json::to_value(&section).unwrap();
+        assert_eq!(json["type"], 9);
+        assert_eq!(json["accessory"]["type"], 11);
+        assert_eq!(
+            json["accessory"]["media"]["url"],
+            "https://example.com/image.png"
+        );
+    }
+
+    #[test]
+    fn test_media_gallery_serialization() {
+        let gallery = MediaGallery::single("https://example.com/img.png");
+        let json = serde_json::to_value(&gallery).unwrap();
+        assert_eq!(json["type"], 12);
+        assert_eq!(json["items"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_webhook_v2_serialization() {
+        let payload = DiscordWebhookV2 {
+            username: "Rustico".to_string(),
+            avatar_url: None,
+            flags: COMPONENTS_V2_FLAG,
+            components: vec![Component::Container(Container::new(
+                Some(0xFF0000),
+                vec![Component::TextDisplay(TextDisplay::new("Test"))],
+            ))],
+        };
+        let json = serde_json::to_value(&payload).unwrap();
+        assert_eq!(json["username"], "Rustico");
+        assert_eq!(json["flags"], 32768);
+        assert!(json["avatar_url"].is_null());
+    }
+
+    #[test]
+    fn test_anilist_response_deserialization() {
+        let json_str = r#"{
+            "data": {
+                "Page": {
+                    "airingSchedules": [
+                        {
+                            "id": 12345,
+                            "episode": 5,
+                            "airingAt": 1700000000,
+                            "media": {
+                                "title": { "romaji": "Test Anime", "english": "Test Anime EN" },
+                                "siteUrl": "https://anilist.co/anime/12345",
+                                "coverImage": { "large": "https://example.com/cover.jpg" },
+                                "description": "A test anime description",
+                                "averageScore": 85,
+                                "studios": { "nodes": [{ "name": "Studio Test" }] }
+                            }
+                        }
+                    ]
+                }
+            }
+        }"#;
+
+        let response: AniListResponse = serde_json::from_str(json_str).unwrap();
+        assert_eq!(response.data.page.airing_schedules.len(), 1);
+
+        let schedule = &response.data.page.airing_schedules[0];
+        assert_eq!(schedule.id, 12345);
+        assert_eq!(schedule.episode, 5);
+        assert_eq!(
+            schedule.media.title.english.as_deref(),
+            Some("Test Anime EN")
+        );
+        assert_eq!(schedule.media.average_score, Some(85));
+    }
 }
