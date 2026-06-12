@@ -1,2 +1,22 @@
+# Build artifacts
 /target
+
+# Environment variables (secrets)
 .env
+
+# Editor files
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Logs
+*.log
+
+# Runtime state (generated at runtime)
+data/rustico_state.yaml
+
+# OS files
+.DS_Store
+Thumbs.db

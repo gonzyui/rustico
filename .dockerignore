@@ -3,4 +3,9 @@ target/
 .env
 .git/
 .gitignore
+.github/
+.cargo/
 README.md
+LICENSE
+data/
+*.md

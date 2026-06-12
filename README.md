@@ -17,13 +17,20 @@
 - **Persistent State**: Automatically saves seen articles/episodes in YAML format to prevent duplicates
 - **Advanced HTML Parsing**: Intelligent HTML entity decoding and tag stripping
 - **Discord Components V2**: Beautiful formatted messages with colors, thumbnails, and rich components
-- **Fully Asynchronous**: Built on `tokio` and `reqwest` with HTTP connection pooling for high performance
+- **Fully Asynchronous**: Built on `tokio` and `reqwest` with non-blocking I/O and connection pooling
 - **Cron Scheduler**: Runs automatically at a configured interval (default: every 15 minutes)
-- **Health Check API**: REST API for monitoring bot status (`/health`, `/metrics`, `/stats`)
+- **Health Check API**: REST API for monitoring bot status (`/health`, `/metrics`, `/stats`) with concurrency limiting
 - **Configurable Message Templates**: Customize formatting via YAML configuration files
 - **Demo Mode**: On first run, sends sample items to verify Discord webhook is working
+- **Graceful Shutdown**: Clean shutdown of all components (scheduler, API server, state persistence)
+- **Auto-Pruning State**: Automatically limits stored seen items to prevent unbounded memory growth
 
 ## 📦 Installation & Setup
+
+### Prerequisites
+
+- [Rust](https://rustup.rs/) 1.80+ (uses `std::sync::LazyLock`)
+- (Optional) `lld` for faster builds: `sudo apt install lld`
 
 ### 1. Clone the repository:
 ```bash
@@ -89,8 +96,6 @@ formatting:
 
 ### 4. Build & Run (Locally):
 
-Ensure you have [Rust](https://rustup.rs/) installed (version 1.70+).
-
 ```bash
 # Debug build
 cargo run
@@ -98,6 +103,8 @@ cargo run
 # Release build (optimized)
 cargo run --release
 ```
+
+> **💡 Tip**: Rustico ships with a `.cargo/config.toml` that uses `lld` as the linker for ~30-50% faster link times. Install it with `sudo apt install lld`.
 
 ### 🐳 Running with Docker
 
@@ -118,9 +125,12 @@ docker run -d \
 docker logs -f rustico-bot
 ```
 
+The Docker image includes a built-in `HEALTHCHECK` that automatically monitors the bot via the `/health` endpoint.
+
 ## 📊 Monitoring & Health Check
 
-Rustico exposes a REST API for monitoring (default: `http://127.0.0.1:3000`):
+Rustico exposes a REST API for monitoring (default: `http://127.0.0.1:3000`).
+Endpoints are protected by a concurrency limiter (max 50 simultaneous requests).
 
 ### Health Check
 ```bash
@@ -171,8 +181,9 @@ stats:
 
 This file is:
 - **Automatically created** on first run
-- **Updated** after each check cycle
+- **Updated** after each check cycle using async I/O (non-blocking)
 - **Preserved** on restart to avoid re-sending old content
+- **Auto-pruned**: ANN entries are capped at 1000, AniList at 500 to prevent unbounded growth
 - **Human-readable** YAML format
 
 ## 🔧 Configuration Validation
@@ -213,41 +224,87 @@ Invalid configurations will show clear error messages.
 - Checks every 15 minutes
 - Only sends new articles/episodes
 - State is automatically saved
-- Graceful shutdown on Ctrl+C
+- Graceful shutdown on Ctrl+C (scheduler, API, and state are all cleanly stopped)
 
 ## 🛠️ Built With
 
-- [Tokio](https://tokio.rs/) - Async runtime
-- [Reqwest](https://docs.rs/reqwest/latest/reqwest/) - HTTP Client with connection pooling
-- [Serde](https://serde.rs/) - Serialization/Deserialization
-- [Serde YAML](https://docs.rs/serde_yaml/) - YAML parsing
-- [RSS](https://docs.rs/rss/latest/rss/) - RSS parsing
-- [Tokio-cron-scheduler](https://docs.rs/tokio-cron-scheduler/) - Task scheduling
-- [Scraper](https://docs.rs/scraper/) - HTML parsing
-- [Axum](https://docs.rs/axum/) - Web framework for health API
-- [Chrono](https://docs.rs/chrono/) - Date/time handling
-- [Anyhow](https://docs.rs/anyhow/) - Error handling
+- [Tokio](https://tokio.rs/) — Async runtime
+- [Reqwest](https://docs.rs/reqwest/latest/reqwest/) — HTTP client with connection pooling
+- [Serde](https://serde.rs/) — Serialization/Deserialization
+- [Serde YML](https://docs.rs/serde_yml/) — YAML parsing
+- [RSS](https://docs.rs/rss/latest/rss/) — RSS parsing
+- [Tokio-cron-scheduler](https://docs.rs/tokio-cron-scheduler/) — Task scheduling
+- [Scraper](https://docs.rs/scraper/) — HTML parsing
+- [Axum](https://docs.rs/axum/) — Web framework for health API
+- [Tower](https://docs.rs/tower/) — Middleware (concurrency limiting)
+- [Chrono](https://docs.rs/chrono/) — Date/time handling
+- [Anyhow](https://docs.rs/anyhow/) — Error handling
+
+## 🧪 Development
+
+### Running Tests
+```bash
+cargo test
+```
+
+### Linting
+```bash
+cargo clippy -- -D warnings
+```
+
+### Formatting
+```bash
+cargo fmt
+```
+
+### Faster Builds
+
+Rustico includes a `.cargo/config.toml` that configures `lld` as the linker. To benefit from it:
+
+```bash
+# Install lld (Debian/Ubuntu)
+sudo apt install lld
+
+# Or use mold (even faster)
+# Edit .cargo/config.toml and replace lld with mold
+```
+
+You can also profile build times with:
+```bash
+cargo build --release --timings
+```
 
 ## 🐛 Troubleshooting
 
 ### Bot not sending messages
-1. Check `.env` file - ensure `DISCORD_WEBHOOK_URL` is valid
-2. Check logs - run with `RUST_LOG=debug`
+1. Check `.env` file — ensure `DISCORD_WEBHOOK_URL` is valid
+2. Check logs — run with `RUST_LOG=debug`
 3. Test health API: `curl http://127.0.0.1:3000/health`
 
 ### Messages not appearing in Discord
 1. Verify webhook hasn't expired (Discord webhooks can expire after 7 days of inactivity)
 2. Check webhook permissions in Discord server settings
-3. Check firewall/network - make sure bot can reach Discord API
+3. Check firewall/network — make sure bot can reach Discord API
 
 ### State file issues
 - Delete `data/rustico_state.yaml` to reset and start fresh in demo mode
 - File is created automatically on first run in the `data/` directory
 
+### Docker health check failing
+- Ensure `API_ENABLED=true` (default)
+- Check that port 3000 is not blocked inside the container
+- Inspect with `docker inspect --format='{{json .State.Health}}' rustico-bot`
+
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
 
 ## 🤝 Contributing
 
-Contributions are welcome! Feel free to open issues and pull requests on GitHub.
+Contributions are welcome! Please ensure your code passes all checks before submitting:
+
+```bash
+cargo fmt --check && cargo clippy -- -D warnings && cargo test
+```
+
+Feel free to open issues and pull requests on GitHub.

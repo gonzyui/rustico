@@ -33,10 +33,7 @@ pub async fn send_discord(
     Ok(())
 }
 
-pub async fn set_webhook_avatar(
-    client: &reqwest::Client,
-    webhook_url: &str,
-) -> Result<()> {
+pub async fn set_webhook_avatar(client: &reqwest::Client, webhook_url: &str) -> Result<()> {
     match tokio::fs::read("assets/logo.png").await {
         Ok(image_data) => {
             let b64 = general_purpose::STANDARD.encode(&image_data);

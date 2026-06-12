@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -40,7 +40,7 @@ impl Config {
     pub fn from_env() -> Result<Self> {
         let webhook_urls_raw =
             std::env::var("DISCORD_WEBHOOK_URL").context("Missing DISCORD_WEBHOOK_URL in .env")?;
-        
+
         let webhook_urls: Vec<String> = webhook_urls_raw
             .split(',')
             .map(|s| s.trim().to_string())
@@ -126,12 +126,13 @@ impl Config {
 
     /// Load configuration from a YAML file (for advanced message templates)
     #[allow(dead_code)]
-    pub fn load_messages_config(path: &str) -> Result<serde_yaml::Value> {
-        let full_path = if path.starts_with("/") || path.starts_with("./") || path.starts_with("../") {
-            path.to_string()
-        } else {
-            format!("config/{}", path)
-        };
+    pub fn load_messages_config(path: &str) -> Result<serde_yml::Value> {
+        let full_path =
+            if path.starts_with("/") || path.starts_with("./") || path.starts_with("../") {
+                path.to_string()
+            } else {
+                format!("config/{}", path)
+            };
 
         if !Path::new(&full_path).exists() {
             bail!("Messages config file not found: {}", full_path);
@@ -140,7 +141,7 @@ impl Config {
         let content = std::fs::read_to_string(&full_path)
             .context(format!("Failed to read messages config: {}", full_path))?;
 
-        serde_yaml::from_str(&content).context("Invalid YAML in messages config")
+        serde_yml::from_str(&content).context("Invalid YAML in messages config")
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -161,7 +162,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_config_validation() {
+    fn test_config_validation_empty_webhooks() {
         let config = Config {
             discord: DiscordConfig {
                 webhook_urls: vec![],
@@ -183,5 +184,61 @@ mod tests {
         };
 
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_config_validation_no_sources() {
+        let config = Config {
+            discord: DiscordConfig {
+                webhook_urls: vec!["https://discord.com/api/webhooks/123/abc".to_string()],
+                delay_between_messages_ms: 800,
+            },
+            sources: SourcesConfig {
+                ann_rss_urls: vec![],
+                anilist_enabled: false,
+            },
+            scheduling: SchedulingConfig {
+                check_interval_minutes: 15,
+                demo_mode_item_limit: 3,
+            },
+            api: ApiConfig {
+                enabled: true,
+                host: "127.0.0.1".to_string(),
+                port: 3000,
+            },
+        };
+
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_config_validation_valid() {
+        let config = Config {
+            discord: DiscordConfig {
+                webhook_urls: vec!["https://discord.com/api/webhooks/123/abc".to_string()],
+                delay_between_messages_ms: 800,
+            },
+            sources: SourcesConfig {
+                ann_rss_urls: vec!["https://www.animenewsnetwork.com/all/rss.xml".to_string()],
+                anilist_enabled: true,
+            },
+            scheduling: SchedulingConfig {
+                check_interval_minutes: 15,
+                demo_mode_item_limit: 3,
+            },
+            api: ApiConfig {
+                enabled: true,
+                host: "127.0.0.1".to_string(),
+                port: 3000,
+            },
+        };
+
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_messages_config_not_found() {
+        let result = Config::load_messages_config("nonexistent.yaml");
+        assert!(result.is_err());
     }
 }
