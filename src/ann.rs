@@ -19,26 +19,23 @@ pub async fn check_ann(
     config: &Config,
     rss_url: &str,
 ) -> Result<()> {
-    info!("🔍 [ANN] Fetching RSS feed: {}", rss_url);
+    info!("[ANN] Fetching RSS feed: {}", rss_url);
 
     let response = client.get(rss_url).send().await?.bytes().await?;
-    info!("📥 [ANN] Received {} bytes", response.len());
+    info!("[ANN] Received {} bytes", response.len());
 
     let channel = rss::Channel::read_from(&response[..])?;
-    info!(
-        "📰 [ANN] Found {} articles in the feed",
-        channel.items().len()
-    );
+    info!("[ANN] Found {} articles in the feed", channel.items().len());
 
     // Phase 1: Collect new items under the lock (brief hold)
     let notifications: Vec<ArticleNotification> = {
-        let mut state_guard = state.lock().await;
+        let mut state_guard = state.write().await;
         let first_run = !state_guard.initialized;
         let demo_limit = config.scheduling.demo_mode_item_limit;
 
         if first_run {
             info!(
-                "🆕 [ANN] First run → sending up to {} articles as demo",
+                "[ANN] First run → sending up to {} articles as demo",
                 demo_limit
             );
         }
@@ -61,10 +58,7 @@ pub async fn check_ann(
             }
 
             if state_guard.is_seen_ann(&guid) {
-                debug!(
-                    "⏭️ [ANN] Already seen: {}",
-                    item.title().unwrap_or("Unknown")
-                );
+                debug!("[ANN] Already seen: {}", item.title().unwrap_or("Unknown"));
                 continue;
             }
 
@@ -88,8 +82,8 @@ pub async fn check_ann(
             };
 
             let header = match &link {
-                Some(url) => format!("# 📰 {}\n[Read full article]({})", title, url),
-                None => format!("# 📰 {}", title),
+                Some(url) => format!("📰 {}\n[Read full article]({})", title, url),
+                None => format!("📰 {}", title),
             };
 
             let now_relative = format!("<t:{}:R>", chrono::Utc::now().timestamp());
@@ -123,7 +117,7 @@ pub async fn check_ann(
     // Phase 2: Send notifications without holding the lock
     let mut new_count: u32 = 0;
     for notification in &notifications {
-        info!("📤 [ANN] Sending: {}", notification.title);
+        info!("[ANN] Sending: {}", notification.title);
 
         match send_to_all_webhooks(
             &client,
@@ -136,8 +130,8 @@ pub async fn check_ann(
                 new_count += count;
             }
             Err(e) => {
-                error!("❌ [ANN] Discord delivery failed: {:?}", e);
-                let mut state_guard = state.lock().await;
+                error!("[ANN] Discord delivery failed: {:?}", e);
+                let mut state_guard = state.write().await;
                 state_guard.increment_errors();
             }
         }
@@ -150,7 +144,7 @@ pub async fn check_ann(
 
     // Phase 3: Update stats under the lock (brief hold)
     {
-        let mut state_guard = state.lock().await;
+        let mut state_guard = state.write().await;
         for _ in 0..new_count {
             state_guard.increment_articles_sent();
         }
@@ -158,6 +152,6 @@ pub async fn check_ann(
         state_guard.update_last_check();
     }
 
-    info!("✅ [ANN] Sent {} article(s)", new_count);
+    info!("[ANN] Sent {} article(s)", new_count);
     Ok(())
 }

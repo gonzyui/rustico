@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
 /// Maximum number of seen items to retain per source.
@@ -35,28 +35,33 @@ impl AppState {
         match tokio::fs::read_to_string(STATE_FILE).await {
             Ok(content) => match serde_yml::from_str::<AppState>(&content) {
                 Ok(state) => {
-                    info!("✅ State loaded from {}", STATE_FILE);
+                    info!("State loaded from {}", STATE_FILE);
                     state
                 }
                 Err(e) => {
-                    warn!("⚠️ Failed to parse {}: {}, starting fresh", STATE_FILE, e);
+                    warn!("Failed to parse {}: {}, starting fresh", STATE_FILE, e);
                     Self::default()
                 }
             },
             Err(e) => {
-                debug!("📝 State file not found ({}), starting fresh", e);
+                debug!("State file not found ({}), starting fresh", e);
                 Self::default()
             }
         }
     }
 
-    /// Save state to YAML file (async, non-blocking)
+    /// Persists the current state to disk using atomic write (tmp + rename)
+    /// to prevent corruption if the process crashes mid-write.
     pub async fn save(&self) -> Result<()> {
         let yaml = serde_yml::to_string(self).context("Failed to serialize state to YAML")?;
-        tokio::fs::write(STATE_FILE, yaml)
+        let tmp_path = format!("{}.tmp", STATE_FILE);
+        tokio::fs::write(&tmp_path, &yaml)
             .await
-            .context(format!("Failed to write {}", STATE_FILE))?;
-        debug!("💾 State saved to {}", STATE_FILE);
+            .context(format!("Failed to write temporary state file {}", tmp_path))?;
+        tokio::fs::rename(&tmp_path, STATE_FILE)
+            .await
+            .context(format!("Failed to rename {} to {}", tmp_path, STATE_FILE))?;
+        debug!("State saved to {}", STATE_FILE);
         Ok(())
     }
 
@@ -107,7 +112,7 @@ impl AppState {
                 self.seen_ann.remove(&key);
             }
             debug!(
-                "🧹 Pruned ANN seen set from {} to {} entries",
+                "Pruned ANN seen set from {} to {} entries",
                 MAX_SEEN_ANN,
                 self.seen_ann.len()
             );
@@ -123,7 +128,7 @@ impl AppState {
                 self.seen_anilist.remove(&key);
             }
             debug!(
-                "🧹 Pruned AniList seen set from {} to {} entries",
+                "Pruned AniList seen set from {} to {} entries",
                 MAX_SEEN_ANILIST,
                 self.seen_anilist.len()
             );
@@ -131,11 +136,11 @@ impl AppState {
     }
 }
 
-pub type SharedAppState = Arc<Mutex<AppState>>;
+pub type SharedAppState = Arc<RwLock<AppState>>;
 
 #[cfg(test)]
 pub fn create_shared_state(state: AppState) -> SharedAppState {
-    Arc::new(Mutex::new(state))
+    Arc::new(RwLock::new(state))
 }
 
 #[cfg(test)]

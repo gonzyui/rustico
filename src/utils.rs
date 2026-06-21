@@ -87,6 +87,22 @@ fn decode_html_entities(s: &str) -> String {
         .to_string()
 }
 
+/// Masks a Discord webhook URL for safe logging by redacting
+/// the token portion, showing only its last 6 characters.
+pub fn mask_webhook_url(url: &str) -> String {
+    match url.rfind('/') {
+        Some(pos) if pos + 1 < url.len() => {
+            let token = &url[pos + 1..];
+            if token.len() > 6 {
+                format!("{}...{}", &url[..pos + 1], &token[token.len() - 6..])
+            } else {
+                format!("{}***", &url[..pos + 1])
+            }
+        }
+        _ => "***masked***".to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -144,5 +160,21 @@ mod tests {
         assert!(result.contains("Item 1"));
         assert!(result.contains("Item 2"));
         assert!(result.contains("•"));
+    }
+
+    #[test]
+    fn test_mask_webhook_url() {
+        let url = "https://discord.com/api/webhooks/123456/abcdefghijklmnopqrstuvwxyz";
+        let masked = mask_webhook_url(url);
+        assert!(masked.starts_with("https://discord.com/api/webhooks/123456/..."));
+        assert!(masked.ends_with("uvwxyz"));
+        assert!(!masked.contains("abcdefghijklmnop"));
+    }
+
+    #[test]
+    fn test_mask_webhook_url_short_token() {
+        let url = "https://discord.com/api/webhooks/123/abc";
+        let masked = mask_webhook_url(url);
+        assert_eq!(masked, "https://discord.com/api/webhooks/123/***");
     }
 }

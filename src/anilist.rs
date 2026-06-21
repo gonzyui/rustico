@@ -6,8 +6,6 @@ use crate::utils::clean_html;
 use anyhow::{Context, Result};
 use tracing::{debug, error, info, warn};
 
-/// Holds the data needed to send a single AniList episode notification,
-/// allowing us to release the mutex before performing I/O.
 struct EpisodeNotification {
     components: Vec<Component>,
     title: String,
@@ -19,7 +17,7 @@ pub async fn check_anilist(
     client: reqwest::Client,
     config: &Config,
 ) -> Result<()> {
-    info!("🔍 [AniList] Fetching recent episodes...");
+    info!("[AniList] Fetching recent episodes...");
 
     let now = chrono::Utc::now().timestamp();
     let window_start = now - 24 * 3600;
@@ -60,7 +58,7 @@ pub async fn check_anilist(
         .await?;
 
     debug!(
-        "📥 [AniList] Raw response (first 200 chars): {}",
+        "[AniList] Raw response (first 200 chars): {}",
         raw_response.chars().take(200).collect::<String>()
     );
 
@@ -74,13 +72,13 @@ pub async fn check_anilist(
 
     // Phase 1: Collect new items under the lock (brief hold)
     let notifications: Vec<EpisodeNotification> = {
-        let mut state_guard = state.lock().await;
+        let mut state_guard = state.write().await;
         let first_run = !state_guard.initialized;
         let demo_limit = config.scheduling.demo_mode_item_limit;
 
         if first_run {
             info!(
-                "🆕 [AniList] First run → sending up to {} episodes as demo",
+                "[AniList] First run → sending up to {} episodes as demo",
                 demo_limit
             );
         }
@@ -136,7 +134,7 @@ pub async fn check_anilist(
                 format!("<t:{}:R>", airing_ts)
             } else {
                 warn!(
-                    "⚠️ [AniList] Invalid airing_at={} for episode id={}",
+                    "[AniList] Invalid airing_at={} for episode id={}",
                     airing_ts, schedule.id
                 );
                 "unknown".to_string()
@@ -193,13 +191,12 @@ pub async fn check_anilist(
 
         items
     };
-    // Lock is released here
 
     // Phase 2: Send notifications without holding the lock
     let mut new_count: u32 = 0;
     for notification in &notifications {
         info!(
-            "📤 [AniList] Sending: {} EP{}",
+            "[AniList] Sending: {} EP{}",
             notification.title, notification.episode
         );
 
@@ -214,8 +211,8 @@ pub async fn check_anilist(
                 new_count += count;
             }
             Err(e) => {
-                error!("❌ [AniList] Discord delivery failed: {:?}", e);
-                let mut state_guard = state.lock().await;
+                error!("[AniList] Discord delivery failed: {:?}", e);
+                let mut state_guard = state.write().await;
                 state_guard.increment_errors();
             }
         }
@@ -228,7 +225,7 @@ pub async fn check_anilist(
 
     // Phase 3: Update stats under the lock (brief hold)
     {
-        let mut state_guard = state.lock().await;
+        let mut state_guard = state.write().await;
         for _ in 0..new_count {
             state_guard.increment_episodes_sent();
         }
@@ -236,6 +233,6 @@ pub async fn check_anilist(
         state_guard.update_last_check();
     }
 
-    info!("✅ [AniList] Sent {} episode(s)", new_count);
+    info!("[AniList] Sent {} episode(s)", new_count);
     Ok(())
 }

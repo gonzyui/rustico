@@ -1,3 +1,4 @@
+use crate::utils::mask_webhook_url;
 use anyhow::Result;
 
 /// Send Discord messages to all configured webhooks
@@ -13,8 +14,8 @@ pub async fn send_to_all_webhooks(
             Ok(_) => success_count += 1,
             Err(e) => {
                 tracing::error!(
-                    "❌ Discord delivery failed for webhook {}: {:?}",
-                    webhook_url,
+                    "Discord delivery failed for webhook {}: {:?}",
+                    mask_webhook_url(webhook_url),
                     e
                 );
             }

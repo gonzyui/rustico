@@ -10,7 +10,7 @@ mod utils;
 
 use anyhow::{Context, Result};
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 use tokio_cron_scheduler::{Job, JobScheduler};
 use tracing::{error, info};
 
@@ -38,15 +38,15 @@ async fn main() -> Result<()> {
         .validate()
         .context("Configuration validation failed")?;
 
-    info!("🚀 Starting Rustico v{}", env!("CARGO_PKG_VERSION"));
-    info!("📝 Configuration:");
+    info!("Starting Rustico v{}", env!("CARGO_PKG_VERSION"));
+    info!("Configuration:");
     info!(
-        "   Webhooks: {} webhook(s) configured",
+        "Webhooks: {} webhook(s) configured",
         config.discord.webhook_urls.len()
     );
-    info!("   ANN RSS: {} feed(s)", config.sources.ann_rss_urls.len());
+    info!("ANN RSS: {} feed(s)", config.sources.ann_rss_urls.len());
     info!(
-        "   AniList: {}",
+        "AniList: {}",
         if config.sources.anilist_enabled {
             "enabled"
         } else {
@@ -54,25 +54,22 @@ async fn main() -> Result<()> {
         }
     );
     info!(
-        "   API: {}",
+        "API: {}",
         if config.api.enabled {
             "enabled"
         } else {
             "disabled"
         }
     );
+    info!("Interval: {} min", config.scheduling.check_interval_minutes);
     info!(
-        "   Interval: {} min",
-        config.scheduling.check_interval_minutes
-    );
-    info!(
-        "   Delay between messages: {} ms",
+        "Delay between messages: {} ms",
         config.discord.delay_between_messages_ms
     );
 
     // Load or create state (async)
     let app_state = AppState::load().await;
-    let shared_state = Arc::new(Mutex::new(app_state));
+    let shared_state = Arc::new(RwLock::new(app_state));
 
     // Build HTTP client
     let client = reqwest::Client::builder()
@@ -86,7 +83,7 @@ async fn main() -> Result<()> {
         .build()
         .context("Failed to build reqwest client")?;
 
-    info!("⏱️ Executing initial pass...");
+    info!("Executing initial pass...");
 
     // Set webhook avatar
     for webhook_url in &config.discord.webhook_urls {
@@ -100,7 +97,7 @@ async fn main() -> Result<()> {
         if let Err(e) = check_ann(shared_state.clone(), client.clone(), &config, rss_url).await {
             error!("ANN Error: {:?}", e);
             {
-                let mut state = shared_state.lock().await;
+                let mut state = shared_state.write().await;
                 state.increment_errors();
             }
         }
@@ -110,21 +107,21 @@ async fn main() -> Result<()> {
         if let Err(e) = check_anilist(shared_state.clone(), client.clone(), &config).await {
             error!("AniList Error: {:?}", e);
             {
-                let mut state = shared_state.lock().await;
+                let mut state = shared_state.write().await;
                 state.increment_errors();
             }
         }
     }
 
     {
-        let mut state = shared_state.lock().await;
+        let mut state = shared_state.write().await;
         state.initialized = true;
         if let Err(e) = state.save().await {
             error!("Failed to save state: {:?}", e);
         }
     }
 
-    info!("✅ Initial pass completed — state initialized");
+    info!("Initial pass completed — state initialized");
 
     // Create shutdown channel for graceful shutdown
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
@@ -141,7 +138,7 @@ async fn main() -> Result<()> {
     // Setup scheduler
     let mut sched = JobScheduler::new().await?;
     let cron_expr = format!("0 */{} * * * *", config.scheduling.check_interval_minutes);
-    info!("⏰ Cron configured: '{}'", cron_expr);
+    info!("Cron configured: '{}'", cron_expr);
 
     let state_clone = shared_state.clone();
     let rss_clone = config.sources.ann_rss_urls.clone();
@@ -158,13 +155,13 @@ async fn main() -> Result<()> {
             let anilist_en = anilist_enabled;
 
             Box::pin(async move {
-                info!("⏰ Scheduled tick");
+                info!("Scheduled tick");
 
                 for rss_url in &rss_urls {
                     if let Err(e) = check_ann(state.clone(), client.clone(), &cfg, rss_url).await {
                         error!("ANN Error: {:?}", e);
                         {
-                            let mut s = state.lock().await;
+                            let mut s = state.write().await;
                             s.increment_errors();
                         }
                     }
@@ -174,14 +171,14 @@ async fn main() -> Result<()> {
                     if let Err(e) = check_anilist(state.clone(), client.clone(), &cfg).await {
                         error!("AniList Error: {:?}", e);
                         {
-                            let mut s = state.lock().await;
+                            let mut s = state.write().await;
                             s.increment_errors();
                         }
                     }
                 }
 
                 // Save state after each check (no unnecessary clone)
-                let state_guard = state.lock().await;
+                let state_guard = state.read().await;
                 if let Err(e) = state_guard.save().await {
                     error!("Failed to save state: {:?}", e);
                 }
@@ -190,13 +187,13 @@ async fn main() -> Result<()> {
         .await?;
 
     sched.start().await?;
-    info!("✅ Scheduler started — press Ctrl+C to stop");
+    info!("Scheduler started — press Ctrl+C to stop");
 
     tokio::signal::ctrl_c()
         .await
         .context("Failed to listen for Ctrl+C")?;
 
-    info!("🛑 Shutdown signal received, stopping...");
+    info!("Shutdown signal received, stopping...");
 
     // Signal the API server to shut down gracefully
     let _ = shutdown_tx.send(true);
@@ -207,13 +204,13 @@ async fn main() -> Result<()> {
 
     // Save state before exit (no unnecessary clone)
     {
-        let state = shared_state.lock().await;
+        let state = shared_state.read().await;
         if let Err(e) = state.save().await {
             error!("Failed to save state before exit: {:?}", e);
         }
     }
 
-    info!("👋 Bye!");
+    info!("Bye!");
 
     Ok(())
 }

@@ -36,7 +36,7 @@ pub struct ApiState {
 }
 
 async fn health_handler(State(api_state): State<ApiState>) -> impl IntoResponse {
-    let guard = api_state.shared_state.lock().await;
+    let guard = api_state.shared_state.read().await;
     let uptime = api_state.start_time.elapsed().as_secs();
 
     let response = HealthResponse {
@@ -57,7 +57,7 @@ async fn health_handler(State(api_state): State<ApiState>) -> impl IntoResponse 
 }
 
 async fn metrics_handler(State(api_state): State<ApiState>) -> impl IntoResponse {
-    let guard = api_state.shared_state.lock().await;
+    let guard = api_state.shared_state.read().await;
 
     let metrics = json!({
         "metrics": {
@@ -74,7 +74,7 @@ async fn metrics_handler(State(api_state): State<ApiState>) -> impl IntoResponse
 }
 
 async fn stats_handler(State(api_state): State<ApiState>) -> impl IntoResponse {
-    let guard = api_state.shared_state.lock().await;
+    let guard = api_state.shared_state.read().await;
 
     let stats = json!({
         "initialized": guard.initialized,
@@ -98,7 +98,7 @@ pub async fn start_health_api(
     shutdown_rx: watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
     if !config.api.enabled {
-        info!("ℹ️ Health API is disabled");
+        info!("Health API is disabled");
         return Ok(());
     }
 
@@ -119,7 +119,7 @@ pub async fn start_health_api(
         .await
         .map_err(|e| anyhow::anyhow!("Failed to bind API server to {}: {}", addr, e))?;
 
-    info!("🌐 Health API listening on http://{}", addr);
+    info!("Health API listening on http://{}", addr);
     info!("   GET http://{}/health - Health check", addr);
     info!("   GET http://{}/metrics - Metrics", addr);
     info!("   GET http://{}/stats - Statistics", addr);
@@ -133,7 +133,7 @@ pub async fn start_health_api(
         .await
         .map_err(|e| anyhow::anyhow!("API server error: {}", e))?;
 
-    info!("🛑 Health API shut down gracefully");
+    info!("Health API shut down gracefully");
     Ok(())
 }
 
