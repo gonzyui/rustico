@@ -50,7 +50,8 @@ pub trait Source {
 
         let notifications = {
             let mut state_guard = state.write().await;
-            self.filter_and_format(&mut state_guard, config, raw_items).await?
+            self.filter_and_format(&mut state_guard, config, raw_items)
+                .await?
         };
 
         let mut success_count = 0;

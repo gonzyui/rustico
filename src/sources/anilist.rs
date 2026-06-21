@@ -18,7 +18,11 @@ impl Source for AnilistSource {
     type RawItem = crate::models::AiringSchedule;
     type Notification = EpisodeNotification;
 
-    async fn fetch(&self, client: &reqwest::Client, _config: &Config) -> Result<Vec<Self::RawItem>> {
+    async fn fetch(
+        &self,
+        client: &reqwest::Client,
+        _config: &Config,
+    ) -> Result<Vec<Self::RawItem>> {
         info!("[AniList] Fetching recent episodes...");
 
         let now = chrono::Utc::now().timestamp();

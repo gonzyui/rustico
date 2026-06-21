@@ -58,10 +58,18 @@ pub struct ColorsConfig {
     pub success: u32,
 }
 
-fn default_ann_color() -> u32 { 0x1E90FF }
-fn default_anilist_color() -> u32 { 0x8A2BE2 }
-fn default_error_color() -> u32 { 0xFF0000 }
-fn default_success_color() -> u32 { 0x00FF00 }
+fn default_ann_color() -> u32 {
+    0x1E90FF
+}
+fn default_anilist_color() -> u32 {
+    0x8A2BE2
+}
+fn default_error_color() -> u32 {
+    0xFF0000
+}
+fn default_success_color() -> u32 {
+    0x00FF00
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FormattingConfig {
@@ -101,12 +109,24 @@ pub struct AnilistFormattingConfig {
     pub sections: Vec<SectionConfig>,
 }
 
-fn default_username() -> String { "Rustico".to_string() }
-fn default_ann_prefix() -> String { "📰".to_string() }
-fn default_anilist_prefix() -> String { "🎬".to_string() }
-fn default_true() -> bool { true }
-fn default_ann_truncate() -> usize { 400 }
-fn default_anilist_truncate() -> usize { 300 }
+fn default_username() -> String {
+    "Rustico".to_string()
+}
+fn default_ann_prefix() -> String {
+    "📰".to_string()
+}
+fn default_anilist_prefix() -> String {
+    "🎬".to_string()
+}
+fn default_true() -> bool {
+    true
+}
+fn default_ann_truncate() -> usize {
+    400
+}
+fn default_anilist_truncate() -> usize {
+    300
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SectionConfig {
@@ -194,7 +214,10 @@ impl Default for AnilistFormattingConfig {
             sections: vec![
                 SectionConfig {
                     kind: "header".to_string(),
-                    format: Some("# {title_prefix} {title}\n**Episode {episode}** • aired {airing_time}".to_string()),
+                    format: Some(
+                        "# {title_prefix} {title}\n**Episode {episode}** • aired {airing_time}"
+                            .to_string(),
+                    ),
                     url_field: None,
                     divider: None,
                     spacing: None,
@@ -229,7 +252,9 @@ impl Default for AnilistFormattingConfig {
                 },
                 SectionConfig {
                     kind: "metadata".to_string(),
-                    format: Some("**🎨 Studio**\n{studio}\n\n**⭐ Average Score**\n{score}/100".to_string()),
+                    format: Some(
+                        "**🎨 Studio**\n{studio}\n\n**⭐ Average Score**\n{score}/100".to_string(),
+                    ),
                     url_field: None,
                     divider: None,
                     spacing: None,

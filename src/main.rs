@@ -92,8 +92,13 @@ async fn main() -> Result<()> {
 
     // Check sources
     for rss_url in &config.sources.ann_rss_urls {
-        let source = crate::sources::ann::AnnSource { rss_url: rss_url.clone() };
-        if let Err(e) = source.check(shared_state.clone(), client.clone(), &config).await {
+        let source = crate::sources::ann::AnnSource {
+            rss_url: rss_url.clone(),
+        };
+        if let Err(e) = source
+            .check(shared_state.clone(), client.clone(), &config)
+            .await
+        {
             error!("ANN Error: {:?}", e);
             let mut state = shared_state.write().await;
             state.increment_errors();
@@ -102,7 +107,10 @@ async fn main() -> Result<()> {
 
     if config.sources.anilist_enabled {
         let source = crate::sources::anilist::AnilistSource;
-        if let Err(e) = source.check(shared_state.clone(), client.clone(), &config).await {
+        if let Err(e) = source
+            .check(shared_state.clone(), client.clone(), &config)
+            .await
+        {
             error!("AniList Error: {:?}", e);
             let mut state = shared_state.write().await;
             state.increment_errors();
@@ -154,7 +162,9 @@ async fn main() -> Result<()> {
                 info!("Scheduled tick");
 
                 for rss_url in &rss_urls {
-                    let source = crate::sources::ann::AnnSource { rss_url: rss_url.clone() };
+                    let source = crate::sources::ann::AnnSource {
+                        rss_url: rss_url.clone(),
+                    };
                     if let Err(e) = source.check(state.clone(), client.clone(), &cfg).await {
                         error!("ANN Error: {:?}", e);
                         let mut s = state.write().await;

@@ -19,7 +19,11 @@ impl Source for AnnSource {
     type RawItem = rss::Item;
     type Notification = ArticleNotification;
 
-    async fn fetch(&self, client: &reqwest::Client, _config: &Config) -> Result<Vec<Self::RawItem>> {
+    async fn fetch(
+        &self,
+        client: &reqwest::Client,
+        _config: &Config,
+    ) -> Result<Vec<Self::RawItem>> {
         info!("[ANN] Fetching RSS feed: {}", self.rss_url);
 
         let response = client.get(&self.rss_url).send().await?.bytes().await?;
