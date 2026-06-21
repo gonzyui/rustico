@@ -5,12 +5,13 @@ use anyhow::Result;
 pub async fn send_to_all_webhooks(
     client: &reqwest::Client,
     webhook_urls: &[String],
+    username: &str,
     components: Vec<crate::models::Component>,
 ) -> Result<u32> {
     let mut success_count = 0;
 
     for webhook_url in webhook_urls {
-        match crate::discord::send_discord(client, webhook_url, components.clone()).await {
+        match crate::discord::send_discord(client, webhook_url, username, components.clone()).await {
             Ok(_) => success_count += 1,
             Err(e) => {
                 tracing::error!(
@@ -49,7 +50,7 @@ mod tests {
             vec![Component::TextDisplay(TextDisplay::new("Test"))],
         ))];
 
-        let result = send_to_all_webhooks(&client, &webhook_urls, components).await;
+        let result = send_to_all_webhooks(&client, &webhook_urls, "Rustico", components).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 0);
     }

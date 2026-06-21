@@ -27,7 +27,6 @@ pub async fn check_ann(
     let channel = rss::Channel::read_from(&response[..])?;
     info!("[ANN] Found {} articles in the feed", channel.items().len());
 
-    // Phase 1: Collect new items under the lock (brief hold)
     let notifications: Vec<ArticleNotification> = {
         let mut state_guard = state.write().await;
         let first_run = !state_guard.initialized;
@@ -69,7 +68,7 @@ pub async fn check_ann(
 
             let raw_desc = item.description().unwrap_or("");
             let cleaned = clean_html(raw_desc);
-            let truncate_len = 400;
+            let truncate_len = config.messages.formatting.ann.truncate_description;
             let description: String = if cleaned.is_empty() {
                 "*No description available.*".to_string()
             } else {
@@ -81,26 +80,110 @@ pub async fn check_ann(
                 }
             };
 
-            let header = match &link {
-                Some(url) => format!("📰 {}\n[Read full article]({})", title, url),
-                None => format!("📰 {}", title),
-            };
+            let mut vars = std::collections::HashMap::new();
+            vars.insert(
+                "title_prefix",
+                config.messages.formatting.ann.title_prefix.clone(),
+            );
+            vars.insert("title", title.clone());
+            vars.insert("link", link.clone().unwrap_or_default());
+            vars.insert("description", description.clone());
+            vars.insert(
+                "source",
+                if config.messages.formatting.ann.show_source {
+                    "Anime News Network".to_string()
+                } else {
+                    "".to_string()
+                },
+            );
+            vars.insert(
+                "timestamp",
+                if config.messages.formatting.ann.show_timestamp {
+                    format!("<t:{}:R>", chrono::Utc::now().timestamp())
+                } else {
+                    "".to_string()
+                },
+            );
 
-            let now_relative = format!("<t:{}:R>", chrono::Utc::now().timestamp());
+            let mut accumulated_text = Vec::new();
+            let mut container_components = Vec::new();
+            let _sections_len = config.messages.formatting.ann.sections.len();
 
-            let container_components = vec![
-                Component::TextDisplay(TextDisplay::new(header)),
-                Component::Separator(Separator::new(true, false)),
-                Component::TextDisplay(TextDisplay::new(description)),
-                Component::Separator(Separator::new(false, false)),
-                Component::TextDisplay(TextDisplay::new(format!(
-                    "-# Anime News Network • {}",
-                    now_relative
-                ))),
-            ];
+            for (idx, sec) in config.messages.formatting.ann.sections.iter().enumerate() {
+                match sec.kind.as_str() {
+                    "header" | "description" | "metadata" | "footer" => {
+                        if let Some(ref fmt) = sec.format {
+                            let rendered = crate::utils::render_template(fmt, &vars);
+                            if !rendered.is_empty() {
+                                accumulated_text
+                                    .push(Component::TextDisplay(TextDisplay::new(rendered)));
+                            }
+                        } else if sec.kind == "description" {
+                            if !description.is_empty() {
+                                accumulated_text
+                                    .push(Component::TextDisplay(TextDisplay::new(&description)));
+                            }
+                        }
+                    }
+                    "link" => {
+                        let link_val = vars.get("link");
+                        if let Some(val) = link_val {
+                            if !val.is_empty() {
+                                if let Some(ref fmt) = sec.format {
+                                    let rendered = crate::utils::render_template(fmt, &vars);
+                                    if !rendered.is_empty() {
+                                        accumulated_text.push(Component::TextDisplay(
+                                            TextDisplay::new(rendered),
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    "separator" => {
+                        if !accumulated_text.is_empty() {
+                            container_components.append(&mut accumulated_text);
+                        }
+                        let divider = sec.divider.unwrap_or_else(|| {
+                            let mut followed_by_footer_or_metadata = true;
+                            for next_sec in &config.messages.formatting.ann.sections[idx + 1..] {
+                                if next_sec.kind != "metadata" && next_sec.kind != "footer" {
+                                    followed_by_footer_or_metadata = false;
+                                    break;
+                                }
+                            }
+                            !followed_by_footer_or_metadata
+                        });
+                        container_components
+                            .push(Component::Separator(Separator::new(divider, false)));
+                    }
+                    "thumbnail" => {
+                        let mut thumb_url = None;
+                        if let Some(ref field) = sec.url_field {
+                            if let Some(val) = vars.get(field.as_str()) {
+                                if !val.is_empty() {
+                                    thumb_url = Some(val.clone());
+                                }
+                            }
+                        }
+                        if let Some(url) = thumb_url {
+                            let text_comps = std::mem::take(&mut accumulated_text);
+                            container_components.push(Component::Section(
+                                crate::models::Section::with_thumbnail(text_comps, url),
+                            ));
+                        } else {
+                            container_components.append(&mut accumulated_text);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if !accumulated_text.is_empty() {
+                container_components.append(&mut accumulated_text);
+            }
 
             let components = vec![Component::Container(Container::new(
-                Some(0x1E90FF),
+                Some(config.messages.colors.ann),
                 container_components,
             ))];
 
@@ -112,9 +195,7 @@ pub async fn check_ann(
 
         items
     };
-    // Lock is released here
 
-    // Phase 2: Send notifications without holding the lock
     let mut new_count: u32 = 0;
     for notification in &notifications {
         info!("[ANN] Sending: {}", notification.title);
@@ -122,6 +203,7 @@ pub async fn check_ann(
         match send_to_all_webhooks(
             &client,
             &config.discord.webhook_urls,
+            &config.messages.formatting.ann.username,
             notification.components.clone(),
         )
         .await
@@ -142,7 +224,6 @@ pub async fn check_ann(
         .await;
     }
 
-    // Phase 3: Update stats under the lock (brief hold)
     {
         let mut state_guard = state.write().await;
         for _ in 0..new_count {

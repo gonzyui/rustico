@@ -17,10 +17,11 @@ const INITIAL_BACKOFF_MS: u64 = 1000;
 pub async fn send_discord(
     client: &reqwest::Client,
     webhook_url: &str,
+    username: &str,
     components: Vec<Component>,
 ) -> Result<()> {
     let payload = DiscordWebhookV2 {
-        username: "Rustico".to_string(),
+        username: username.to_string(),
         avatar_url: None,
         flags: COMPONENTS_V2_FLAG,
         components,

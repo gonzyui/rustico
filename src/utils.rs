@@ -103,6 +103,22 @@ pub fn mask_webhook_url(url: &str) -> String {
     }
 }
 
+/// Interpolates placeholders in a template string using keys from a map.
+pub fn render_template(template: &str, vars: &std::collections::HashMap<&str, String>) -> String {
+    static RE: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"\{([a-zA-Z0-9_]+)\}").unwrap());
+
+    RE.replace_all(template, |caps: &regex::Captures| {
+        let key = &caps[1];
+        if let Some(val) = vars.get(key) {
+            val.clone()
+        } else {
+            caps[0].to_string()
+        }
+    })
+    .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -176,5 +192,17 @@ mod tests {
         let url = "https://discord.com/api/webhooks/123/abc";
         let masked = mask_webhook_url(url);
         assert_eq!(masked, "https://discord.com/api/webhooks/123/***");
+    }
+
+    #[test]
+    fn test_render_template() {
+        let mut vars = std::collections::HashMap::new();
+        vars.insert("name", "Rustico".to_string());
+        vars.insert("version", "0.4.0".to_string());
+        vars.insert("unused", "value".to_string());
+
+        let template = "Welcome to {name} v{version}! {non_existent_key}";
+        let rendered = render_template(template, &vars);
+        assert_eq!(rendered, "Welcome to Rustico v0.4.0! {non_existent_key}");
     }
 }

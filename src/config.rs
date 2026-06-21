@@ -8,6 +8,7 @@ pub struct Config {
     pub sources: SourcesConfig,
     pub scheduling: SchedulingConfig,
     pub api: ApiConfig,
+    pub messages: MessagesConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,8 +36,244 @@ pub struct ApiConfig {
     pub port: u16,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessagesConfig {
+    pub colors: ColorsConfig,
+    pub formatting: FormattingConfig,
+    #[serde(default)]
+    pub demo: Option<serde_yml::Value>,
+    #[serde(default)]
+    pub errors: Option<serde_yml::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ColorsConfig {
+    #[serde(default = "default_ann_color")]
+    pub ann: u32,
+    #[serde(default = "default_anilist_color")]
+    pub anilist: u32,
+    #[serde(default = "default_error_color")]
+    pub error: u32,
+    #[serde(default = "default_success_color")]
+    pub success: u32,
+}
+
+fn default_ann_color() -> u32 { 0x1E90FF }
+fn default_anilist_color() -> u32 { 0x8A2BE2 }
+fn default_error_color() -> u32 { 0xFF0000 }
+fn default_success_color() -> u32 { 0x00FF00 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FormattingConfig {
+    pub ann: AnnFormattingConfig,
+    pub anilist: AnilistFormattingConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnnFormattingConfig {
+    #[serde(default = "default_username")]
+    pub username: String,
+    #[serde(default = "default_ann_prefix")]
+    pub title_prefix: String,
+    #[serde(default = "default_true")]
+    pub show_timestamp: bool,
+    #[serde(default = "default_ann_truncate")]
+    pub truncate_description: usize,
+    #[serde(default = "default_true")]
+    pub show_source: bool,
+    pub sections: Vec<SectionConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnilistFormattingConfig {
+    #[serde(default = "default_username")]
+    pub username: String,
+    #[serde(default = "default_anilist_prefix")]
+    pub title_prefix: String,
+    #[serde(default = "default_true")]
+    pub show_timestamp: bool,
+    #[serde(default = "default_anilist_truncate")]
+    pub truncate_description: usize,
+    #[serde(default = "default_true")]
+    pub show_cover: bool,
+    #[serde(default = "default_true")]
+    pub show_score: bool,
+    pub sections: Vec<SectionConfig>,
+}
+
+fn default_username() -> String { "Rustico".to_string() }
+fn default_ann_prefix() -> String { "📰".to_string() }
+fn default_anilist_prefix() -> String { "🎬".to_string() }
+fn default_true() -> bool { true }
+fn default_ann_truncate() -> usize { 400 }
+fn default_anilist_truncate() -> usize { 300 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SectionConfig {
+    #[serde(rename = "type")]
+    pub kind: String,
+    #[serde(default)]
+    pub format: Option<String>,
+    #[serde(default)]
+    pub url_field: Option<String>,
+    #[serde(default)]
+    pub divider: Option<bool>,
+    #[serde(default)]
+    pub spacing: Option<u8>,
+}
+
+impl Default for ColorsConfig {
+    fn default() -> Self {
+        Self {
+            ann: default_ann_color(),
+            anilist: default_anilist_color(),
+            error: default_error_color(),
+            success: default_success_color(),
+        }
+    }
+}
+
+impl Default for AnnFormattingConfig {
+    fn default() -> Self {
+        Self {
+            username: default_username(),
+            title_prefix: default_ann_prefix(),
+            show_timestamp: default_true(),
+            truncate_description: default_ann_truncate(),
+            show_source: default_true(),
+            sections: vec![
+                SectionConfig {
+                    kind: "header".to_string(),
+                    format: Some("# {title_prefix} {title}".to_string()),
+                    url_field: None,
+                    divider: None,
+                    spacing: None,
+                },
+                SectionConfig {
+                    kind: "link".to_string(),
+                    format: Some("[Read full article]({link})".to_string()),
+                    url_field: None,
+                    divider: None,
+                    spacing: None,
+                },
+                SectionConfig {
+                    kind: "separator".to_string(),
+                    format: None,
+                    url_field: None,
+                    divider: None,
+                    spacing: None,
+                },
+                SectionConfig {
+                    kind: "description".to_string(),
+                    format: None,
+                    url_field: None,
+                    divider: None,
+                    spacing: None,
+                },
+                SectionConfig {
+                    kind: "metadata".to_string(),
+                    format: Some("-# {source} • {timestamp}".to_string()),
+                    url_field: None,
+                    divider: None,
+                    spacing: None,
+                },
+            ],
+        }
+    }
+}
+
+impl Default for AnilistFormattingConfig {
+    fn default() -> Self {
+        Self {
+            username: default_username(),
+            title_prefix: default_anilist_prefix(),
+            show_timestamp: default_true(),
+            truncate_description: default_anilist_truncate(),
+            show_cover: default_true(),
+            show_score: default_true(),
+            sections: vec![
+                SectionConfig {
+                    kind: "header".to_string(),
+                    format: Some("# {title_prefix} {title}\n**Episode {episode}** • aired {airing_time}".to_string()),
+                    url_field: None,
+                    divider: None,
+                    spacing: None,
+                },
+                SectionConfig {
+                    kind: "link".to_string(),
+                    format: Some("[View on AniList]({url})".to_string()),
+                    url_field: None,
+                    divider: None,
+                    spacing: None,
+                },
+                SectionConfig {
+                    kind: "thumbnail".to_string(),
+                    format: None,
+                    url_field: Some("cover_url".to_string()),
+                    divider: None,
+                    spacing: None,
+                },
+                SectionConfig {
+                    kind: "separator".to_string(),
+                    format: None,
+                    url_field: None,
+                    divider: None,
+                    spacing: None,
+                },
+                SectionConfig {
+                    kind: "description".to_string(),
+                    format: None,
+                    url_field: None,
+                    divider: None,
+                    spacing: None,
+                },
+                SectionConfig {
+                    kind: "metadata".to_string(),
+                    format: Some("**🎨 Studio**\n{studio}\n\n**⭐ Average Score**\n{score}/100".to_string()),
+                    url_field: None,
+                    divider: None,
+                    spacing: None,
+                },
+                SectionConfig {
+                    kind: "separator".to_string(),
+                    format: None,
+                    url_field: None,
+                    divider: None,
+                    spacing: None,
+                },
+                SectionConfig {
+                    kind: "footer".to_string(),
+                    format: Some("-# AniList • {score}/100".to_string()),
+                    url_field: None,
+                    divider: None,
+                    spacing: None,
+                },
+            ],
+        }
+    }
+}
+
+impl Default for FormattingConfig {
+    fn default() -> Self {
+        Self {
+            ann: AnnFormattingConfig::default(),
+            anilist: AnilistFormattingConfig::default(),
+        }
+    }
+}
+
+impl Default for MessagesConfig {
+    fn default() -> Self {
+        Self {
+            colors: ColorsConfig::default(),
+            formatting: FormattingConfig::default(),
+            demo: None,
+            errors: None,
+        }
+    }
+}
+
 impl Config {
-    /// Load configuration from environment variables with validation
     pub fn from_env() -> Result<Self> {
         let webhook_urls_raw =
             std::env::var("DISCORD_WEBHOOK_URL").context("Missing DISCORD_WEBHOOK_URL in .env")?;
@@ -51,7 +288,6 @@ impl Config {
             bail!("DISCORD_WEBHOOK_URL is empty or invalid");
         }
 
-        // Validate webhook URLs
         for url in &webhook_urls {
             if !url.starts_with("https://discord.com/api/webhooks/") {
                 bail!("Invalid Discord webhook URL: {}", url);
@@ -103,6 +339,9 @@ impl Config {
             .parse()
             .context("API_PORT must be a valid port number")?;
 
+        let messages = Self::load_messages_config("messages.yaml")
+            .context("Failed to load messages config")?;
+
         Ok(Config {
             discord: DiscordConfig {
                 webhook_urls,
@@ -121,12 +360,11 @@ impl Config {
                 host: api_host,
                 port: api_port,
             },
+            messages,
         })
     }
 
-    /// Load configuration from a YAML file (for advanced message templates)
-    #[allow(dead_code)]
-    pub fn load_messages_config(path: &str) -> Result<serde_yml::Value> {
+    pub fn load_messages_config(path: &str) -> Result<MessagesConfig> {
         let full_path =
             if path.starts_with("/") || path.starts_with("./") || path.starts_with("../") {
                 path.to_string()
@@ -181,6 +419,7 @@ mod tests {
                 host: "127.0.0.1".to_string(),
                 port: 3000,
             },
+            messages: MessagesConfig::default(),
         };
 
         assert!(config.validate().is_err());
@@ -206,6 +445,7 @@ mod tests {
                 host: "127.0.0.1".to_string(),
                 port: 3000,
             },
+            messages: MessagesConfig::default(),
         };
 
         assert!(config.validate().is_err());
@@ -231,6 +471,7 @@ mod tests {
                 host: "127.0.0.1".to_string(),
                 port: 3000,
             },
+            messages: MessagesConfig::default(),
         };
 
         assert!(config.validate().is_ok());

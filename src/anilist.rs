@@ -66,11 +66,10 @@ pub async fn check_anilist(
         .context("AniList parsing error — see raw response in debug logs")?;
 
     info!(
-        "🎬 [AniList] Found {} episode(s) in the time window",
+        "[AniList] Found {} episode(s) in the time window",
         res.data.page.airing_schedules.len()
     );
 
-    // Phase 1: Collect new items under the lock (brief hold)
     let notifications: Vec<EpisodeNotification> = {
         let mut state_guard = state.write().await;
         let first_run = !state_guard.initialized;
@@ -114,7 +113,7 @@ pub async fn check_anilist(
 
             let score = schedule.media.average_score.unwrap_or(0);
 
-            let truncate_len = 300;
+            let truncate_len = config.messages.formatting.anilist.truncate_description;
             let description = match schedule.media.description.as_deref() {
                 Some(d) if !d.is_empty() => {
                     let cleaned = clean_html(d);
@@ -146,39 +145,120 @@ pub async fn check_anilist(
                 .as_ref()
                 .and_then(|c| c.large.clone());
 
-            let header_text = format!(
-                "# 🎬 {}\n**Episode {}** • aired {}\n[View on AniList]({})",
-                title, schedule.episode, airing_display, schedule.media.site_url
+            let mut vars = std::collections::HashMap::new();
+            vars.insert(
+                "title_prefix",
+                config.messages.formatting.anilist.title_prefix.clone(),
+            );
+            vars.insert("title", title.clone());
+            vars.insert("episode", schedule.episode.to_string());
+            vars.insert(
+                "airing_time",
+                if config.messages.formatting.anilist.show_timestamp {
+                    airing_display.clone()
+                } else {
+                    "".to_string()
+                },
+            );
+            vars.insert("url", schedule.media.site_url.clone());
+            vars.insert("cover_url", cover_url.clone().unwrap_or_default());
+            vars.insert("studio", studio_name.to_string());
+            vars.insert(
+                "score",
+                if config.messages.formatting.anilist.show_score {
+                    score.to_string()
+                } else {
+                    "".to_string()
+                },
             );
 
-            let info_text = format!(
-                "**🎨 Studio**\n{}\n\n**⭐ Average Score**\n{}/100",
-                studio_name, score
-            );
+            let mut accumulated_text = Vec::new();
+            let mut container_components = Vec::new();
 
-            let mut container_components: Vec<Component> = Vec::new();
-
-            if let Some(ref url) = cover_url {
-                container_components.push(Component::Section(Section::with_thumbnail(
-                    vec![Component::TextDisplay(TextDisplay::new(header_text))],
-                    url.clone(),
-                )));
-            } else {
-                container_components.push(Component::TextDisplay(TextDisplay::new(header_text)));
+            for (idx, sec) in config
+                .messages
+                .formatting
+                .anilist
+                .sections
+                .iter()
+                .enumerate()
+            {
+                match sec.kind.as_str() {
+                    "header" | "description" | "metadata" | "footer" => {
+                        if let Some(ref fmt) = sec.format {
+                            let rendered = crate::utils::render_template(fmt, &vars);
+                            if !rendered.is_empty() {
+                                accumulated_text
+                                    .push(Component::TextDisplay(TextDisplay::new(rendered)));
+                            }
+                        } else if sec.kind == "description" {
+                            if !description.is_empty() {
+                                accumulated_text
+                                    .push(Component::TextDisplay(TextDisplay::new(&description)));
+                            }
+                        }
+                    }
+                    "link" => {
+                        let url_val = vars.get("url");
+                        if let Some(val) = url_val {
+                            if !val.is_empty() {
+                                if let Some(ref fmt) = sec.format {
+                                    let rendered = crate::utils::render_template(fmt, &vars);
+                                    if !rendered.is_empty() {
+                                        accumulated_text.push(Component::TextDisplay(
+                                            TextDisplay::new(rendered),
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    "separator" => {
+                        if !accumulated_text.is_empty() {
+                            container_components.append(&mut accumulated_text);
+                        }
+                        let divider = sec.divider.unwrap_or_else(|| {
+                            let mut followed_by_footer_or_metadata = true;
+                            for next_sec in &config.messages.formatting.anilist.sections[idx + 1..]
+                            {
+                                if next_sec.kind != "metadata" && next_sec.kind != "footer" {
+                                    followed_by_footer_or_metadata = false;
+                                    break;
+                                }
+                            }
+                            !followed_by_footer_or_metadata
+                        });
+                        container_components
+                            .push(Component::Separator(Separator::new(divider, false)));
+                    }
+                    "thumbnail" => {
+                        let mut thumb_url = None;
+                        if config.messages.formatting.anilist.show_cover {
+                            if let Some(ref field) = sec.url_field {
+                                if let Some(val) = vars.get(field.as_str()) {
+                                    if !val.is_empty() {
+                                        thumb_url = Some(val.clone());
+                                    }
+                                }
+                            }
+                        }
+                        if let Some(url) = thumb_url {
+                            let text_comps = std::mem::take(&mut accumulated_text);
+                            container_components
+                                .push(Component::Section(Section::with_thumbnail(text_comps, url)));
+                        } else {
+                            container_components.append(&mut accumulated_text);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if !accumulated_text.is_empty() {
+                container_components.append(&mut accumulated_text);
             }
 
-            container_components.push(Component::Separator(Separator::new(true, false)));
-            container_components.push(Component::TextDisplay(TextDisplay::new(description)));
-            container_components.push(Component::Separator(Separator::new(true, false)));
-            container_components.push(Component::TextDisplay(TextDisplay::new(info_text)));
-            container_components.push(Component::Separator(Separator::new(false, false)));
-            container_components.push(Component::TextDisplay(TextDisplay::new(format!(
-                "-# AniList • {}/100",
-                score
-            ))));
-
             let components = vec![Component::Container(Container::new(
-                Some(0x8A2BE2),
+                Some(config.messages.colors.anilist),
                 container_components,
             ))];
 
@@ -192,7 +272,6 @@ pub async fn check_anilist(
         items
     };
 
-    // Phase 2: Send notifications without holding the lock
     let mut new_count: u32 = 0;
     for notification in &notifications {
         info!(
@@ -203,6 +282,7 @@ pub async fn check_anilist(
         match send_to_all_webhooks(
             &client,
             &config.discord.webhook_urls,
+            &config.messages.formatting.anilist.username,
             notification.components.clone(),
         )
         .await
@@ -223,7 +303,6 @@ pub async fn check_anilist(
         .await;
     }
 
-    // Phase 3: Update stats under the lock (brief hold)
     {
         let mut state_guard = state.write().await;
         for _ in 0..new_count {
