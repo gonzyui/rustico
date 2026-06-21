@@ -1,10 +1,9 @@
-mod anilist;
-mod ann;
 mod api;
 mod config;
 mod discord;
 mod models;
 mod processor;
+mod sources;
 mod state;
 mod utils;
 
@@ -14,10 +13,9 @@ use tokio::sync::RwLock;
 use tokio_cron_scheduler::{Job, JobScheduler};
 use tracing::{error, info};
 
-use crate::anilist::check_anilist;
-use crate::ann::check_ann;
 use crate::api::start_health_api;
 use crate::config::Config;
+use crate::sources::Source;
 use crate::state::AppState;
 
 #[tokio::main]
@@ -94,22 +92,20 @@ async fn main() -> Result<()> {
 
     // Check sources
     for rss_url in &config.sources.ann_rss_urls {
-        if let Err(e) = check_ann(shared_state.clone(), client.clone(), &config, rss_url).await {
+        let source = crate::sources::ann::AnnSource { rss_url: rss_url.clone() };
+        if let Err(e) = source.check(shared_state.clone(), client.clone(), &config).await {
             error!("ANN Error: {:?}", e);
-            {
-                let mut state = shared_state.write().await;
-                state.increment_errors();
-            }
+            let mut state = shared_state.write().await;
+            state.increment_errors();
         }
     }
 
     if config.sources.anilist_enabled {
-        if let Err(e) = check_anilist(shared_state.clone(), client.clone(), &config).await {
+        let source = crate::sources::anilist::AnilistSource;
+        if let Err(e) = source.check(shared_state.clone(), client.clone(), &config).await {
             error!("AniList Error: {:?}", e);
-            {
-                let mut state = shared_state.write().await;
-                state.increment_errors();
-            }
+            let mut state = shared_state.write().await;
+            state.increment_errors();
         }
     }
 
@@ -158,22 +154,20 @@ async fn main() -> Result<()> {
                 info!("Scheduled tick");
 
                 for rss_url in &rss_urls {
-                    if let Err(e) = check_ann(state.clone(), client.clone(), &cfg, rss_url).await {
+                    let source = crate::sources::ann::AnnSource { rss_url: rss_url.clone() };
+                    if let Err(e) = source.check(state.clone(), client.clone(), &cfg).await {
                         error!("ANN Error: {:?}", e);
-                        {
-                            let mut s = state.write().await;
-                            s.increment_errors();
-                        }
+                        let mut s = state.write().await;
+                        s.increment_errors();
                     }
                 }
 
                 if anilist_en {
-                    if let Err(e) = check_anilist(state.clone(), client.clone(), &cfg).await {
+                    let source = crate::sources::anilist::AnilistSource;
+                    if let Err(e) = source.check(state.clone(), client.clone(), &cfg).await {
                         error!("AniList Error: {:?}", e);
-                        {
-                            let mut s = state.write().await;
-                            s.increment_errors();
-                        }
+                        let mut s = state.write().await;
+                        s.increment_errors();
                     }
                 }
 

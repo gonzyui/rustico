@@ -1,35 +1,43 @@
 use crate::config::Config;
 use crate::models::{Component, Container, Separator, TextDisplay};
 use crate::processor::send_to_all_webhooks;
-use crate::state::SharedAppState;
+use crate::sources::Source;
 use crate::utils::clean_html;
 use anyhow::Result;
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 
-/// Holds the data needed to send a single ANN article notification,
-/// allowing us to release the mutex before performing I/O.
-struct ArticleNotification {
-    components: Vec<Component>,
-    title: String,
+pub struct AnnSource {
+    pub rss_url: String,
 }
 
-pub async fn check_ann(
-    state: SharedAppState,
-    client: reqwest::Client,
-    config: &Config,
-    rss_url: &str,
-) -> Result<()> {
-    info!("[ANN] Fetching RSS feed: {}", rss_url);
+pub struct ArticleNotification {
+    pub components: Vec<Component>,
+    pub title: String,
+}
 
-    let response = client.get(rss_url).send().await?.bytes().await?;
-    info!("[ANN] Received {} bytes", response.len());
+impl Source for AnnSource {
+    type RawItem = rss::Item;
+    type Notification = ArticleNotification;
 
-    let channel = rss::Channel::read_from(&response[..])?;
-    info!("[ANN] Found {} articles in the feed", channel.items().len());
+    async fn fetch(&self, client: &reqwest::Client, _config: &Config) -> Result<Vec<Self::RawItem>> {
+        info!("[ANN] Fetching RSS feed: {}", self.rss_url);
 
-    let notifications: Vec<ArticleNotification> = {
-        let mut state_guard = state.write().await;
-        let first_run = !state_guard.initialized;
+        let response = client.get(&self.rss_url).send().await?.bytes().await?;
+        info!("[ANN] Received {} bytes", response.len());
+
+        let channel = rss::Channel::read_from(&response[..])?;
+        info!("[ANN] Found {} articles in the feed", channel.items().len());
+
+        Ok(channel.items().to_vec())
+    }
+
+    async fn filter_and_format(
+        &self,
+        state: &mut crate::state::AppState,
+        config: &Config,
+        raw_items: Vec<Self::RawItem>,
+    ) -> Result<Vec<Self::Notification>> {
+        let first_run = !state.initialized;
         let demo_limit = config.scheduling.demo_mode_item_limit;
 
         if first_run {
@@ -41,7 +49,7 @@ pub async fn check_ann(
 
         let mut items = Vec::new();
 
-        for (i, item) in channel.items().iter().take(20).enumerate() {
+        for (i, item) in raw_items.iter().take(20).enumerate() {
             if first_run && i >= demo_limit {
                 break;
             }
@@ -56,12 +64,12 @@ pub async fn check_ann(
                 continue;
             }
 
-            if state_guard.is_seen_ann(&guid) {
+            if state.is_seen_ann(&guid) {
                 debug!("[ANN] Already seen: {}", item.title().unwrap_or("Unknown"));
                 continue;
             }
 
-            state_guard.add_seen_ann(guid);
+            state.add_seen_ann(guid);
 
             let title = item.title().unwrap_or("Untitled").to_string();
             let link = item.link().map(String::from).filter(|s| !s.is_empty());
@@ -107,7 +115,6 @@ pub async fn check_ann(
 
             let mut accumulated_text = Vec::new();
             let mut container_components = Vec::new();
-            let _sections_len = config.messages.formatting.ann.sections.len();
 
             for (idx, sec) in config.messages.formatting.ann.sections.iter().enumerate() {
                 match sec.kind.as_str() {
@@ -193,46 +200,35 @@ pub async fn check_ann(
             });
         }
 
-        items
-    };
+        Ok(items)
+    }
 
-    let mut new_count: u32 = 0;
-    for notification in &notifications {
+    async fn send(
+        &self,
+        client: &reqwest::Client,
+        config: &Config,
+        notification: &Self::Notification,
+    ) -> Result<u32> {
         info!("[ANN] Sending: {}", notification.title);
 
-        match send_to_all_webhooks(
-            &client,
+        send_to_all_webhooks(
+            client,
             &config.discord.webhook_urls,
             &config.messages.formatting.ann.username,
             notification.components.clone(),
         )
         .await
-        {
-            Ok(count) => {
-                new_count += count;
-            }
-            Err(e) => {
-                error!("[ANN] Discord delivery failed: {:?}", e);
-                let mut state_guard = state.write().await;
-                state_guard.increment_errors();
-            }
-        }
-
-        tokio::time::sleep(tokio::time::Duration::from_millis(
-            config.discord.delay_between_messages_ms,
-        ))
-        .await;
     }
 
-    {
-        let mut state_guard = state.write().await;
-        for _ in 0..new_count {
-            state_guard.increment_articles_sent();
+    async fn update_state(
+        &self,
+        state: &mut crate::state::AppState,
+        success_count: u32,
+    ) -> Result<()> {
+        for _ in 0..success_count {
+            state.increment_articles_sent();
         }
-        state_guard.initialized = true;
-        state_guard.update_last_check();
+        info!("[ANN] Sent {} article(s)", success_count);
+        Ok(())
     }
-
-    info!("[ANN] Sent {} article(s)", new_count);
-    Ok(())
 }

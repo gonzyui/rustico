@@ -1,78 +1,87 @@
 use crate::config::Config;
 use crate::models::{AniListResponse, Component, Container, Section, Separator, TextDisplay};
 use crate::processor::send_to_all_webhooks;
-use crate::state::SharedAppState;
+use crate::sources::Source;
 use crate::utils::clean_html;
 use anyhow::{Context, Result};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
-struct EpisodeNotification {
-    components: Vec<Component>,
-    title: String,
-    episode: i32,
+pub struct AnilistSource;
+
+pub struct EpisodeNotification {
+    pub components: Vec<Component>,
+    pub title: String,
+    pub episode: i32,
 }
 
-pub async fn check_anilist(
-    state: SharedAppState,
-    client: reqwest::Client,
-    config: &Config,
-) -> Result<()> {
-    info!("[AniList] Fetching recent episodes...");
+impl Source for AnilistSource {
+    type RawItem = crate::models::AiringSchedule;
+    type Notification = EpisodeNotification;
 
-    let now = chrono::Utc::now().timestamp();
-    let window_start = now - 24 * 3600;
+    async fn fetch(&self, client: &reqwest::Client, _config: &Config) -> Result<Vec<Self::RawItem>> {
+        info!("[AniList] Fetching recent episodes...");
 
-    let query = r#"
-        query ($from: Int, $to: Int) {
-            Page(perPage: 50) {
-                airingSchedules(airingAt_greater: $from, airingAt_lesser: $to, sort: TIME_DESC) {
-                    id
-                    episode
-                    airingAt
-                    media {
-                        title { romaji english }
-                        siteUrl
-                        coverImage { large }
-                        description(asHtml: false)
-                        averageScore
-                        studios(isMain: true) {
-                            nodes { name }
+        let now = chrono::Utc::now().timestamp();
+        let window_start = now - 24 * 3600;
+
+        let query = r#"
+            query ($from: Int, $to: Int) {
+                Page(perPage: 50) {
+                    airingSchedules(airingAt_greater: $from, airingAt_lesser: $to, sort: TIME_DESC) {
+                        id
+                        episode
+                        airingAt
+                        media {
+                            title { romaji english }
+                            siteUrl
+                            coverImage { large }
+                            description(asHtml: false)
+                            averageScore
+                            studios(isMain: true) {
+                                nodes { name }
+                            }
                         }
                     }
                 }
             }
-        }
-    "#;
+        "#;
 
-    let body = serde_json::json!({
-        "query": query,
-        "variables": { "from": window_start, "to": now }
-    });
+        let body = serde_json::json!({
+            "query": query,
+            "variables": { "from": window_start, "to": now }
+        });
 
-    let raw_response = client
-        .post("https://graphql.anilist.co")
-        .json(&body)
-        .send()
-        .await?
-        .text()
-        .await?;
+        let raw_response = client
+            .post("https://graphql.anilist.co")
+            .json(&body)
+            .send()
+            .await?
+            .text()
+            .await?;
 
-    debug!(
-        "[AniList] Raw response (first 200 chars): {}",
-        raw_response.chars().take(200).collect::<String>()
-    );
+        debug!(
+            "[AniList] Raw response (first 200 chars): {}",
+            raw_response.chars().take(200).collect::<String>()
+        );
 
-    let res: AniListResponse = serde_json::from_str(&raw_response)
-        .context("AniList parsing error — see raw response in debug logs")?;
+        let res: AniListResponse = serde_json::from_str(&raw_response)
+            .context("AniList parsing error — see raw response in debug logs")?;
 
-    info!(
-        "[AniList] Found {} episode(s) in the time window",
-        res.data.page.airing_schedules.len()
-    );
+        info!(
+            "[AniList] Found {} episode(s) in the time window",
+            res.data.page.airing_schedules.len()
+        );
 
-    let notifications: Vec<EpisodeNotification> = {
-        let mut state_guard = state.write().await;
-        let first_run = !state_guard.initialized;
+        Ok(res.data.page.airing_schedules)
+    }
+
+    async fn filter_and_format(
+        &self,
+        state: &mut crate::state::AppState,
+        config: &Config,
+        raw_items: Vec<Self::RawItem>,
+    ) -> Result<Vec<Self::Notification>> {
+        let first_run = !state.initialized;
         let demo_limit = config.scheduling.demo_mode_item_limit;
 
         if first_run {
@@ -84,15 +93,15 @@ pub async fn check_anilist(
 
         let mut items = Vec::new();
 
-        for (i, schedule) in res.data.page.airing_schedules.iter().enumerate() {
+        for (i, schedule) in raw_items.into_iter().enumerate() {
             if first_run && i >= demo_limit {
                 break;
             }
 
-            if state_guard.is_seen_anilist(schedule.id) {
+            if state.is_seen_anilist(schedule.id) {
                 continue;
             }
-            state_guard.add_seen_anilist(schedule.id);
+            state.add_seen_anilist(schedule.id);
 
             let title = schedule
                 .media
@@ -269,49 +278,38 @@ pub async fn check_anilist(
             });
         }
 
-        items
-    };
+        Ok(items)
+    }
 
-    let mut new_count: u32 = 0;
-    for notification in &notifications {
+    async fn send(
+        &self,
+        client: &reqwest::Client,
+        config: &Config,
+        notification: &Self::Notification,
+    ) -> Result<u32> {
         info!(
             "[AniList] Sending: {} EP{}",
             notification.title, notification.episode
         );
 
-        match send_to_all_webhooks(
-            &client,
+        send_to_all_webhooks(
+            client,
             &config.discord.webhook_urls,
             &config.messages.formatting.anilist.username,
             notification.components.clone(),
         )
         .await
-        {
-            Ok(count) => {
-                new_count += count;
-            }
-            Err(e) => {
-                error!("[AniList] Discord delivery failed: {:?}", e);
-                let mut state_guard = state.write().await;
-                state_guard.increment_errors();
-            }
-        }
-
-        tokio::time::sleep(tokio::time::Duration::from_millis(
-            config.discord.delay_between_messages_ms,
-        ))
-        .await;
     }
 
-    {
-        let mut state_guard = state.write().await;
-        for _ in 0..new_count {
-            state_guard.increment_episodes_sent();
+    async fn update_state(
+        &self,
+        state: &mut crate::state::AppState,
+        success_count: u32,
+    ) -> Result<()> {
+        for _ in 0..success_count {
+            state.increment_episodes_sent();
         }
-        state_guard.initialized = true;
-        state_guard.update_last_check();
+        info!("[AniList] Sent {} episode(s)", success_count);
+        Ok(())
     }
-
-    info!("[AniList] Sent {} episode(s)", new_count);
-    Ok(())
 }
