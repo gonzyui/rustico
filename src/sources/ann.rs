@@ -129,11 +129,9 @@ impl Source for AnnSource {
                                 accumulated_text
                                     .push(Component::TextDisplay(TextDisplay::new(rendered)));
                             }
-                        } else if sec.kind == "description" {
-                            if !description.is_empty() {
-                                accumulated_text
-                                    .push(Component::TextDisplay(TextDisplay::new(&description)));
-                            }
+                        } else if sec.kind == "description" && !description.is_empty() {
+                            accumulated_text
+                                .push(Component::TextDisplay(TextDisplay::new(&description)));
                         }
                     }
                     "link" => {

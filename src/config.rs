@@ -36,7 +36,7 @@ pub struct ApiConfig {
     pub port: u16,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct MessagesConfig {
     pub colors: ColorsConfig,
     pub formatting: FormattingConfig,
@@ -71,7 +71,7 @@ fn default_success_color() -> u32 {
     0x00FF00
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct FormattingConfig {
     pub ann: AnnFormattingConfig,
     pub anilist: AnilistFormattingConfig,
@@ -274,26 +274,6 @@ impl Default for AnilistFormattingConfig {
                     spacing: None,
                 },
             ],
-        }
-    }
-}
-
-impl Default for FormattingConfig {
-    fn default() -> Self {
-        Self {
-            ann: AnnFormattingConfig::default(),
-            anilist: AnilistFormattingConfig::default(),
-        }
-    }
-}
-
-impl Default for MessagesConfig {
-    fn default() -> Self {
-        Self {
-            colors: ColorsConfig::default(),
-            formatting: FormattingConfig::default(),
-            demo: None,
-            errors: None,
         }
     }
 }
